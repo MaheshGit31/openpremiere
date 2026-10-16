@@ -1,3 +1,4 @@
+import { VERSION } from './changelog.js';
 import { P, h, bus, ls, tc, hist, seqDur, selClips, findClip, setSeq } from './core.js';
 import { panels, initDock, setLayout, resetLayout, L, popMenu, openPanel, closePanel, isOpen, curWs, maxHovered } from './dock.js';
 import './fxlib1.js'; import './fxlib2.js'; import './fxlib3.js';
@@ -15,6 +16,8 @@ import { newProject, openProject, saveProject, startAutosave } from './project.j
 import { db } from './db.js';
 import './shortcuts2.js';
 import './amonitor.js';
+import './library.js';
+import './learn.js';
 
 window.OP_openPanel = openPanel;
 const { tabs, split } = L;
@@ -23,8 +26,8 @@ const { tabs, split } = L;
 const WS = {
   'Learning': () => split('h', [split('v', [tabs(['learn']), tabs(['project', 'effects'])], [1, 1]), tabs(['program']), tabs(['effectControls', 'lumetri'])], [1, 1.6, 1]),
   'Assembly': () => split('v', [split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history']), tabs(['program'])], [1.2, 1]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.5, 1]),
-  'Import': () => split('h', [tabs(['mediaBrowser']), split('v', [tabs(['source']), tabs(['project'])], [1, 1.2])], [1.3, 1]),
-  'Editing': () => split('v', [split('h', [tabs(['source', 'effectControls', 'mixer', 'metadata']), tabs(['program']), tabs(['meters'])], [1.1, 1.1, .08]), split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history', 'audioMonitor']), tabs(['tools']), tabs(['timeline'])], [1.1, .08, 4])], [1.2, 1]),
+  'Import': () => split('h', [tabs(['freeLib', 'mediaBrowser']), split('v', [tabs(['source']), tabs(['project'])], [1, 1.2])], [1.3, 1]),
+  'Editing': () => split('v', [split('h', [tabs(['source', 'effectControls', 'mixer', 'metadata']), tabs(['program']), tabs(['meters'])], [1.1, 1.1, .08]), split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history', 'audioMonitor', 'freeLib']), tabs(['tools']), tabs(['timeline'])], [1.1, .08, 4])], [1.2, 1]),
   'Color': () => split('h', [split('v', [split('h', [tabs(['scopes']), tabs(['program'])], [1, 1.2]), split('h', [tabs(['tools']), tabs(['timeline'])], [.06, 1])], [1.4, 1]), tabs(['lumetri', 'effectControls'])], [3, 1]),
   'Effects': () => split('v', [split('h', [tabs(['source']), tabs(['program']), tabs(['effects', 'project'])], [1, 1.2, .8]), split('h', [tabs(['effectControls']), tabs(['tools']), tabs(['timeline'])], [1, .05, 2.4])], [1.2, 1]),
   'Audio': () => split('v', [split('h', [tabs(['mixer', 'effectControls']), tabs(['program']), tabs(['meters','audioMonitor'])], [1.4, 1, .5]), split('h', [tabs(['project', 'effects']), tabs(['tools']), tabs(['timeline'])], [.9, .06, 3])], [1.1, 1]),
@@ -84,7 +87,7 @@ const MENUS = {
     ...Object.values(panels).map(p => [p.title, () => isOpen(p.id) ? closePanel(p.id) : openPanel(p.id), '', isOpen(p.id)]),
     '-', ['Reset to Saved Layout', () => resetLayout(curWs(), WS[curWs()]()), ''],
   ],
-  Help: () => [['Keyboard Shortcuts', () => openPanel('learn')], ['About OpenPremiere', () => alert('OpenPremiere v0.1 — open source browser video editor')]],
+  Help: () => [['Tutorials and Changelog', () => openPanel('learn')], ['Keyboard Shortcuts', () => openPanel('learn')], ['About OpenPremiere', () => alert('OpenPremiere v' + VERSION)]],
 };
 const IS_MAC_DEFAULT = /Mac|iPhone|iPad/.test(navigator.platform || '');
 export const plat = () => ls.get('platform', IS_MAC_DEFAULT ? 'mac' : 'win');
@@ -101,7 +104,7 @@ function drawMenus() {
   const mac = plat() === 'mac';
   mb.className = mac ? 'mac' : 'win';
   const mk = (n, items) => h('div', { class: 'mn' + (n === 'OpenPremiere' ? ' app' : ''), onclick: () => { const r = mb.querySelector('[data-mn="' + n + '"]').getBoundingClientRect(); popMenu(r.left, r.bottom, items().map(it => it === '-' ? it : [it[0], it[1] || (() => { }), fmtKey(it[2]), it[3]])); }, 'data-mn': n }, n);
-  if (mac) mb.append(mk('OpenPremiere', () => [['About OpenPremiere', () => alert('OpenPremiere v0.2 - open source browser video editor')], '-', ['Preferences...', prefsDialog, 'Ctrl+,'], '-', ['Home', goHome, '']]));
+  if (mac) mb.append(mk('OpenPremiere', () => [['About OpenPremiere', () => alert('OpenPremiere v' + VERSION)], '-', ['Preferences...', prefsDialog, 'Ctrl+,'], '-', ['Home', goHome, '']]));
   for (const n of Object.keys(MENUS)) mb.append(mk(n, MENUS[n]));
   const col = h('button', { class: 'topx', title: 'Hide top bar (hover the top edge to bring it back)', onclick: () => setTopCollapsed(!topCollapsed) });
   col.append(icon(topCollapsed ? 'pin' : 'closex', 14)); mb.append(h('div', { class: 'grow' }), col);

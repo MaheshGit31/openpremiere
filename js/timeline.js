@@ -61,7 +61,7 @@ function build(el) {
     else if (e.shiftKey) { e.preventDefault(); scroll.scrollLeft += e.deltaY; }
   }, { passive: false });
   scroll.addEventListener('pointerdown', down);
-  scroll.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('text/op-trans') || e.dataTransfer.types.includes('text/op-item') || e.dataTransfer.types.includes('text/op-fx')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  scroll.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('text/op-trans') || e.dataTransfer.types.includes('text/op-item') || e.dataTransfer.types.includes('text/op-lib') || e.dataTransfer.types.includes('text/op-fx')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
   scroll.addEventListener('drop', drop);
   bus.on('seq', redraw); bus.on('project', () => {}); bus.on('time', tick);
   bus.on('resize', () => {}); bus.on('transport', () => {});
@@ -96,6 +96,12 @@ function drop(e) {
   }
   const fxT = e.dataTransfer.getData('text/op-fx');
   if (fxT) { e.preventDefault(); const ce = document.elementFromPoint(e.clientX, e.clientY)?.closest('.clip'); if (ce) { const f = findClip(ce.dataset.id); if (f) import('./panels2.js').then(m => m.applyFx(fxT, [f.c])); } return; }
+  const lib = e.dataTransfer.getData('text/op-lib');
+  if (lib) {
+    e.preventDefault(); let ent; try { ent = JSON.parse(lib); } catch { return; }
+    const t = E.q(Math.max(0, tOf(laneX(e) + scroll.scrollLeft))); const rowEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.row'); const tr = rowEl && E.trackOf(rowEl.dataset.tr);
+    import('./library.js').then(m => m.insertEntry(ent, t, tr)).catch(() => { }); return;
+  }
   const id = e.dataTransfer.getData('text/op-item'); if (!id) return; e.preventDefault();
   const it = item(id); if (!it || !P.seq) return;
   const t = E.q(Math.max(0, tOf(laneX(e) + scroll.scrollLeft - 0)));

@@ -452,6 +452,5 @@ reg('info', 'Info', infoBuild);
 reg('history', 'History', histBuild);
 reg('markers', 'Markers', markersBuild);
 reg('metadata', 'Metadata', metaBuild);
-reg('learn', 'Learn', learnBuild);
 reg('libraries', 'Libraries', libBuild);
 reg('mediaBrowser', 'Media Browser', mbBuild);
