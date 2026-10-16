@@ -5,27 +5,30 @@ import { pb } from './playback.js';
 import * as E from './edit.js';
 import { icon } from './icons.js';
 import { ls } from './core.js';
+import { tl } from './timeline.js';
 import { toolDown, drawToolOv, GT, endEdit } from './gfxtools.js';
 
 // ---------------- Project ----------------
-let projEl, projBody, projPath = 'root', projView = ls.get('proj.view', 'icon'), projQ = '', projSort = ls.get('proj.sort', 'name'), projFilter = 'all', projSel = new Set(), projLast = null, projSearchEl;
+let projEl, projBody, projPath = 'root', projView = ls.get('proj.view', 'icon'), projQ = '', projSort = ls.get('proj.sort', 'name'), projFilter = 'all', projSel = new Set(), projLast = null, projSearchEl, projCount;
 const LABELS = ['#7c8cf8', '#2ec27e', '#e5a50a', '#e66100', '#c64600', '#c061cb', '#26a269', '#ff7b63'];
 export const usedIds = () => { const u = new Set(); for (const s of P.seqs) for (const t of [...s.v, ...s.a]) for (const c of t.clips) u.add(c.item); return u; };
 function projBuild(el) {
   projEl = el; el.classList.add('proj'); el.tabIndex = 0;
-  const bar = h('div', { class: 'ptool' });
-  projSearchEl = h('input', { class: 'psearch', placeholder: 'Search project (Ctrl+F)', oninput: e => { projQ = e.target.value.toLowerCase(); projDraw(); } });
-  const sortBtn = h('button', { class: 'tb', title: 'Sort and Filter', onclick: e => popMenu(e.clientX, e.clientY, [
+  const info = h('div', { class: 'pinfo' }, h('span', { class: 'pfi' }, icon('filmstrip', 18)), h('span', {}, (P.projName || 'Untitled') + '.oprproj'));
+  projSearchEl = h('input', { class: 'psearch', placeholder: '', title: 'Search project (Ctrl+F)', oninput: e => { projQ = e.target.value.toLowerCase(); projDraw(); } });
+  projCount = h('div', { class: 'pcount' });
+  const srow = h('div', { class: 'psrow' }, h('div', { class: 'psbox' }, icon('search', 15), projSearchEl), projCount);
+  const sortBtn = h('button', { class: 'pb', title: 'Sort and Filter', onclick: e => popMenu(e.clientX, e.clientY, [
     ...['name', 'duration', 'type', 'date added'].map(k => ['Sort by ' + k, () => { projSort = k; ls.set('proj.sort', k); projDraw(); }, '', projSort === k]), '-',
-    ...[['all', 'Show all'], ['video', 'Video only'], ['audio', 'Audio only'], ['image', 'Images only'], ['unused', 'Unused media'], ['fav', 'Favorites']].map(([k, l]) => [l, () => { projFilter = k; projDraw(); }, '', projFilter === k])]) }, icon('sort'));
-  bar.append(projSearchEl, h('div', { class: 'grow' }), sortBtn,
-    h('button', { class: 'tb', title: 'List View', onclick: () => { projView = 'list'; ls.set('proj.view', 'list'); projDraw(); } }, icon('list')),
-    h('button', { class: 'tb', title: 'Icon View', onclick: () => { projView = 'icon'; ls.set('proj.view', 'icon'); projDraw(); } }, icon('grid')),
-    h('button', { class: 'tb', title: 'New Bin', onclick: newBin }, icon('folder')),
-    h('button', { class: 'tb', title: 'New Item', onclick: e => newItemMenu(e) }, icon('newitem')),
-    h('button', { class: 'tb', title: 'Import (Ctrl+I)', onclick: pickFiles }, icon('import')));
+    ...[['all', 'Show all'], ['video', 'Video only'], ['audio', 'Audio only'], ['image', 'Images only'], ['unused', 'Unused media'], ['fav', 'Favorites']].map(([k, l]) => [l, () => { projFilter = k; projDraw(); }, '', projFilter === k])]) }, icon('sort', 17));
+  const vb = (name, v, title) => h('button', { class: 'pb' + (projView === v ? ' on' : ''), title, 'data-v': v, onclick: () => { projView = v; ls.set('proj.view', v); projEl.querySelectorAll('.pb[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === v)); projDraw(); } }, icon(name, 17));
+  const zoomS = h('input', { type: 'range', class: 'pzoom', min: 70, max: 220, value: ls.get('proj.zoom', 120), title: 'Thumbnail size', oninput: e => { ls.set('proj.zoom', +e.target.value); el.style.setProperty('--ps', e.target.value + 'px'); } });
+  el.style.setProperty('--ps', ls.get('proj.zoom', 120) + 'px');
+  const bot = h('div', { class: 'pbot' }, vb('list', 'list', 'List View'), vb('grid', 'icon', 'Icon View'), h('span', { class: 'pzl' }, icon('chev', 0)), zoomS, sortBtn, h('div', { class: 'grow' }),
+    h('button', { class: 'pb', title: 'New Bin', onclick: newBin }, icon('folder', 17)), h('button', { class: 'pb', title: 'New Item', onclick: e => newItemMenu(e) }, icon('newitem', 17)),
+    h('button', { class: 'pb', title: 'Import (Ctrl+I)', onclick: pickFiles }, icon('import', 17)), h('button', { class: 'pb', title: 'Delete', onclick: () => delItems([...projSel]) }, icon('trash', 17)));
   projBody = h('div', { class: 'pbodyl' });
-  el.append(bar, projBody);
+  el.append(info, srow, projBody, bot);
   el.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
   el.addEventListener('drop', e => { if (e.dataTransfer.files.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], projPath); } });
   el.addEventListener('keydown', e => {
@@ -69,12 +72,12 @@ function projDraw() {
   const crumbs = []; let cur = projPath;
   while (cur) { const b = P.bins.find(x => x.id === cur); crumbs.unshift(b); cur = b && b.parent; }
   const searching = !!projQ;
-  projBody.append(h('div', { class: 'crumbs' }, searching ? h('span', {}, 'Search results for "' + projQ + '"') : crumbs.map((b, i) => h('span', { onclick: () => { projPath = b.id; projDraw(); } }, b.name + (i < crumbs.length - 1 ? ' ›' : '')))));
+  if (searching || projPath !== 'root') projBody.append(h('div', { class: 'crumbs' }, searching ? h('span', {}, 'Search results for "' + projQ + '"') : crumbs.map((b, i) => h('span', { onclick: () => { projPath = b.id; projDraw(); } }, b.name + (i < crumbs.length - 1 ? ' ›' : '')))));
   const wrap = h('div', { class: projView === 'icon' ? 'igrid' : 'ilist' });
   const q = s => s.toLowerCase().includes(projQ);
   const bins = P.bins.filter(b => (searching ? q(b.name) : b.parent === projPath));
   bins.forEach(b => wrap.append(h('div', { class: 'pitem bin', ondblclick: () => { projPath = b.id; projQ = ''; if (projSearchEl) projSearchEl.value = ''; projDraw(); } }, h('div', { class: 'pth' }, icon('folder', 40)), h('div', { class: 'pnm' }, b.name))));
-  if (searching || projPath === 'root') P.seqs.filter(s => !searching || q(s.name)).forEach(s => wrap.append(h('div', { class: 'pitem seqi' + (s === P.seq ? ' on' : ''), ondblclick: () => setSeq(s) }, h('div', { class: 'pth' }, icon('seq', 40)), h('div', { class: 'pnm' }, s.name), h('div', { class: 'pdr' }, tc(seqDur(s), s.fps)))));
+  if (searching || projPath === 'root') P.seqs.filter(s => !searching || q(s.name)).forEach(s => wrap.append(h('div', { class: 'pitem seqi' + (s === P.seq ? ' on' : ''), ondblclick: () => setSeq(s) }, h('div', { class: 'pth' }, icon('seq', 40), h('i', { class: 'pbadge' }, icon('seq', 13))), h('div', { class: 'pnm' }, s.name), h('div', { class: 'pdr' }, tc(seqDur(s), s.fps)))));
   const used = usedIds();
   let list = P.items.filter(i => !i.gfxItem && (searching ? q(i.name) : i.bin === projPath));
   if (projFilter === 'unused') list = list.filter(i => !used.has(i.id)); else if (projFilter === 'fav') list = list.filter(i => i.fav); else if (projFilter !== 'all') list = list.filter(i => i.kind === projFilter);
@@ -96,7 +99,7 @@ function projDraw() {
       [it.fav ? 'Remove Favorite' : 'Add to Favorites', () => { it.fav = !it.fav; projDraw(); }],
       ...LABELS.slice(0, 4).map((c, i) => ['Label ' + ['Violet', 'Green', 'Yellow', 'Orange'][i], () => { [...projSel].forEach(id => { const x = P.items.find(y => y.id === id); if (x) x.label = c; }); projDraw(); }]), ['Clear Label', () => { [...projSel].forEach(id => { const x = P.items.find(y => y.id === id); if (x) x.label = null; }); projDraw(); }], '-',
       ['Rename...', () => renameItem(it.id), 'F2'], ['Delete', () => delItems([...projSel]), 'Del']]); });
-    const thumb = h('div', { class: 'pth' }, it.thumb ? h('img', { src: it.thumb, draggable: false }) : icon(it.kind === 'audio' ? 'audio' : 'film', 36));
+    const thumb = h('div', { class: 'pth' }, it.thumb ? h('img', { src: it.thumb, draggable: false }) : icon(it.kind === 'audio' ? 'audio' : 'film', 36), h('i', { class: 'pbadge' }, icon(it.kind === 'audio' ? 'audio' : it.kind === 'image' ? 'freeform' : 'filmstrip', 13)));
     if (it.kind === 'video' && it.thumb && projView === 'icon') hoverScrub(thumb, it);
     d.append(thumb, h('div', { class: 'pnm' }, h('i', { class: 'plab', style: { background: it.label || 'transparent' } }), it.fav ? h('span', { class: 'pfav' }, icon('star', 10)) : null, h('span', {}, it.name)), h('div', { class: 'pdr' }, it.kind === 'image' ? '' : tc(it.dur, it.fps)));
     if (!used.has(it.id) && projFilter === 'all') d.classList.add('unused');
@@ -104,7 +107,7 @@ function projDraw() {
   });
   if (!wrap.children.length) wrap.append(h('div', { class: 'pempty' }, searching ? 'No matches' : 'Import media to begin'));
   projBody.append(wrap);
-  projBody.append(h('div', { class: 'pfoot' }, list.length + ' item' + (list.length === 1 ? '' : 's') + (projSel.size ? ', ' + projSel.size + ' selected' : '')));
+  if (projCount) projCount.textContent = (projSel.size || (P.source ? 1 : 0)) + ' of ' + (list.length + (projPath === 'root' ? P.seqs.length : 0)) + ' items selected';
 }
 // hover to scrub: seek a hidden video on mouse move and paint its frame over the thumbnail
 function hoverScrub(box, it) {
@@ -160,7 +163,7 @@ function srcBuild(el) {
   srcBar.addEventListener('pointerdown', e => { const mv = ev => { const r = srcBar.getBoundingClientRect(); if (P.source) src.seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * P.source.dur); }; mv(e); const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); }; addEventListener('pointermove', mv); addEventListener('pointerup', up); });
   const b = (ic, t, f) => h('button', { class: 'tb', title: t, onclick: f }, icon(ic));
   const ctl = h('div', { class: 'mctl' },
-    b('markin', 'Mark In (I)', () => src.markIn()), b('markout', 'Mark Out (O)', () => src.markOut()),
+    b('marker', 'Add Marker (M)', () => tl.addMarker()), b('markin', 'Mark In (I)', () => src.markIn()), b('markout', 'Mark Out (O)', () => src.markOut()),
     b('gotoin', 'Go to In', () => src.seek(P.srcIn || 0)), b('stepb', 'Step Back (Left)', () => src.step(-1)), b('play', 'Play (Space)', () => src.play()), b('stepf', 'Step Forward (Right)', () => src.step(1)), b('gotoout', 'Go to Out', () => src.seek(P.srcOut == null ? (P.source ? P.source.dur : 0) : P.srcOut)),
     h('span', { class: 'sep' }), b('insert', 'Insert (,)', () => src.insert('insert')), b('overwrite', 'Overwrite (.)', () => src.insert('overwrite')));
   el.append(srcWrap, h('div', { class: 'mtcs' }, srcTc, h('div', { class: 'grow' }), srcDur), srcBar, ctl);
@@ -183,8 +186,8 @@ function pgBuild(el) {
   const ctl = h('div', { class: 'mctl' },
     b('markin', 'Mark In (I)', () => { P.inP = P.t; if (P.outP != null && P.outP < P.inP) P.outP = null; bus.emit('seq'); }), b('markout', 'Mark Out (O)', () => { P.outP = P.t; if (P.inP != null && P.inP > P.outP) P.inP = null; bus.emit('seq'); }),
     b('gotoin', 'Go to In (Shift+I)', () => pb.seek(P.inP == null ? 0 : P.inP)), b('stepb', 'Step Back (Left)', () => pb.step(-1)), b('play', 'Play/Stop (Space)', () => pb.toggle()), b('stepf', 'Step Forward (Right)', () => pb.step(1)), b('gotoout', 'Go to Out (Shift+O)', () => pb.seek(P.outP == null ? seqDur() : P.outP)),
-    h('span', { class: 'sep' }), b('lift', 'Lift (;)', () => E.liftExtract(false)), b('extract', "Extract (')", () => E.liftExtract(true)), b('camera', 'Export Frame (Ctrl+Shift+E)', exportFrame));
-  el.append(pgWrap, h('div', { class: 'mtcs' }, pgTc, fit, q, h('div', { class: 'grow' }), pgDur), pgBar, ctl);
+    h('span', { class: 'sep' }), b('lift', 'Lift (;)', () => E.liftExtract(false)), b('extract', "Extract (')", () => E.liftExtract(true)), b('camera', 'Export Frame (Ctrl+Shift+E)', exportFrame), h('span', { class: 'sep' }), b('plus', 'Button Editor', e => popMenu(e.clientX, e.clientY, [['Insert (,)', () => src.insert('insert')], ['Overwrite (.)', () => src.insert('overwrite')], ['Export Frame', exportFrame]])));
+  el.append(pgWrap, h('div', { class: 'mtcs' }, pgTc, fit, q, h('button', { class: 'tb', title: 'Settings', onclick: e => popMenu(e.clientX, e.clientY, [['Fit', () => { zoomMode = 'fit'; layoutMon(); }], ['100%', () => { zoomMode = '1'; layoutMon(); }], ['Full resolution', () => { pb.q = 1; pb.invalidate(); }], ['Half resolution', () => { pb.q = .5; pb.invalidate(); }]]) }, icon('wrench', 16)), h('div', { class: 'grow' }), pgDur), pgBar, h('div', { class: 'mnav' }, h('i', {}), h('i', {})), ctl);
   pb.attach(pgCv);
   const upd = () => {
     const s = P.seq; if (!s) return;

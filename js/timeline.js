@@ -8,7 +8,7 @@ import { ATRANS } from './afx.js';
 import { icon } from './icons.js';
 import * as E from './edit.js';
 
-const HDR = 128, RULER = 26; let RH_V = 46, RH_A = 46;
+const HDR = 176, RULER = 26; let RH_V = 46, RH_A = 46;
 let root, scroll, inner, ruler, playhead, tcEl, snapLine, seqTabs;
 const pk = new Map(); // peaks cache by item id
 
@@ -41,18 +41,20 @@ function build(el) {
   const head = h('div', { class: 'tl-head' });
   tcEl = h('div', { class: 'tl-tc' }, '00:00:00:00');
   tcEl.addEventListener('dblclick', () => { const v = prompt('Go to timecode (frames or seconds)'); if (v != null && v !== '') pb.seek(parseFloat(v) || 0); });
-  const mkTool = (icon, title, on, get) => { const b = h('button', { class: 'tb' + (get() ? ' on' : ''), title, onclick: () => { on(); b.classList.toggle('on', get()); } }, icon); bus.on('toolsync', () => b.classList.toggle('on', get())); return b; };
+  const mkTool = (ic, title, on, get) => { const b = h('button', { class: 'tbx' + (get() ? ' on' : ''), title, onclick: () => { on(); b.classList.toggle('on', get()); } }, ic); bus.on('toolsync', () => b.classList.toggle('on', get())); return b; };
   seqTabs = h('div', { class: 'tl-seqs' });
   head.append(tcEl,
-    mkTool(icon('magnet', 15), 'Snap in Timeline (S)', () => { P.snap = !P.snap; }, () => P.snap),
-    mkTool(icon('link', 15), 'Linked Selection', () => { P.linked = P.linked === false; }, () => P.linked !== false),
-    h('button', { class: 'tb', title: 'Add Marker (M)', onclick: () => addMarker() }, icon('marker', 14)),
-    seqTabs, h('div', { class: 'grow' }),
+    mkTool(icon('ripple', 17), 'Ripple Edit', () => { P.ripple = !P.ripple; }, () => !!P.ripple),
+    mkTool(icon('magnet', 17), 'Snap in Timeline (S)', () => { P.snap = !P.snap; }, () => P.snap),
+    mkTool(icon('link', 17), 'Linked Selection', () => { P.linked = P.linked === false; }, () => P.linked !== false),
+    h('button', { class: 'tbx', title: 'Add Marker (M)', onclick: () => addMarker() }, icon('marker', 16)),
+    h('button', { class: 'tbx', title: 'Timeline Display Settings', onclick: e => popMenu(e.clientX, e.clientY, [['Fit timeline to window', () => fitZoom(), '\\'], ['Taller tracks', () => { RH_V = RH_A = Math.min(120, RH_V + 10); redraw(); }, 'Shift+='], ['Shorter tracks', () => { RH_V = RH_A = Math.max(26, RH_V - 10); redraw(); }, 'Shift+-']]) }, icon('wrench', 16)),
+    h('div', { class: 'grow' }),
     h('input', { type: 'range', min: 5, max: 600, value: P.zoom, class: 'tl-zoom', title: 'Zoom', oninput: e => setZoom(+e.target.value) }));
   scroll = h('div', { class: 'tl-scroll' });
   inner = h('div', { class: 'tl-inner' });
   scroll.append(inner);
-  root.append(head, scroll);
+  root.append(seqTabs, head, scroll);
   el.append(root);
   scroll.addEventListener('wheel', e => {
     if (e.ctrlKey || e.altKey) { e.preventDefault(); const r = scroll.getBoundingClientRect(); const mx = e.clientX - r.left - HDR; const tt = (scroll.scrollLeft + mx) / P.zoom; setZoom(clamp(P.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 5, 600)); scroll.scrollLeft = tt * P.zoom - mx; }
@@ -152,14 +154,16 @@ function redraw() {
 function buildRow(tr, k) {
   const row = h('div', { class: 'row ' + k, 'data-tr': tr.id, style: { height: (k === 'v' ? RH_V : RH_A) + 'px' } });
   const hd = h('div', { class: 'hdr', style: { width: HDR + 'px' } });
+  const lockB = h('button', { class: 'hbtn' + (tr.lock ? ' on' : ''), title: 'Toggle Track Lock', onclick: () => { tr.lock = !tr.lock; redraw(); } }, icon(tr.lock ? 'lock' : 'unlock', 15));
   const tgt = h('button', { class: 'tgt' + (tr.target ? ' on' : ''), title: 'Source Patching / Targeting', onclick: () => { P.seq[k].forEach(x => x.target = false); tr.target = true; redraw(); } }, tr.name);
-  hd.append(tgt);
-  if (k === 'v') hd.append(h('button', { class: 'tb sm' + (tr.mute ? '' : ' on'), title: 'Toggle Track Output', onclick: () => { tr.mute = !tr.mute; pb.invalidate(); redraw(); } }, icon('eye', 13)));
+  const syncB = h('button', { class: 'hbtn' + (tr.syncLock === false ? '' : ' on'), title: 'Toggle Sync Lock', onclick: () => { tr.syncLock = tr.syncLock === false; redraw(); } }, icon('sync', 15));
+  hd.append(lockB, tgt, syncB);
+  if (k === 'v') hd.append(h('button', { class: 'hbtn' + (tr.mute ? '' : ' on'), title: 'Toggle Track Output', onclick: () => { tr.mute = !tr.mute; pb.invalidate(); redraw(); } }, icon('eye', 16)));
   else {
-    hd.append(h('button', { class: 'tb sm' + (tr.mute ? ' on red' : ''), title: 'Mute Track', onclick: () => { tr.mute = !tr.mute; pb.invalidate(); redraw(); } }, 'M'));
-    hd.append(h('button', { class: 'tb sm' + (tr.solo ? ' on yel' : ''), title: 'Solo Track', onclick: () => { tr.solo = !tr.solo; pb.invalidate(); redraw(); } }, 'S'));
+    hd.append(h('button', { class: 'hbtn txt' + (tr.mute ? ' red' : ''), title: 'Mute Track', onclick: () => { tr.mute = !tr.mute; pb.invalidate(); redraw(); } }, 'M'));
+    hd.append(h('button', { class: 'hbtn txt' + (tr.solo ? ' yel' : ''), title: 'Solo Track', onclick: () => { tr.solo = !tr.solo; pb.invalidate(); redraw(); } }, 'S'));
+    hd.append(h('button', { class: 'hbtn', title: 'Voice-over record', onclick: () => { } }, icon('mic', 15)));
   }
-  hd.append(h('button', { class: 'tb sm' + (tr.lock ? ' on' : ''), title: 'Toggle Track Lock', onclick: () => { tr.lock = !tr.lock; redraw(); } }, icon(tr.lock ? 'lock' : 'unlock', 12)));
   const lane = h('div', { class: 'lane' + (tr.lock ? ' locked' : ''), style: { left: HDR + 'px', width: px(Math.max(seqDur(), 10) + 30) + 'px' } });
   tr.clips.forEach(c => lane.append(buildClip(c, tr, k)));
   tr.clips.forEach(c => ['tin', 'tout'].forEach(side => { const r = transRegion(tr, c, side); if (r) lane.append(buildTrn(c, side, r)); }));

@@ -367,7 +367,7 @@ function metersBuild(el) {
   el.classList.add('meters');
   const bars = [h('div', { class: 'mbar2' }, h('div', { class: 'fill' }), h('div', { class: 'pk' })), h('div', { class: 'mbar2' }, h('div', { class: 'fill' }), h('div', { class: 'pk' }))];
   const scale = h('div', { class: 'mscale' }, [0, -6, -12, -18, -24, -36, -48, -60].map(d => h('span', { style: { bottom: dbPos(d) + '%' } }, String(d))));
-  el.append(h('div', { class: 'mwrap' }, scale, bars[0], bars[1]));
+  el.append(h('div', { class: 'mwrap' }, bars[0], bars[1], scale), h('div', { class: 'msolo' }, h('button', {}, 'S'), h('button', {}, 'S')));
   const pk = [0, 0]; let raf = 0;
   const loop = () => { if (!el.isConnected) return; if (el.offsetParent) { const l = pb.level(); l.forEach((v, i) => { const db = v > 0 ? 20 * Math.log10(v) : -90; const pos = dbPos(db); bars[i].firstChild.style.height = pos + '%'; pk[i] = Math.max(pos, pk[i] - .6); bars[i].lastChild.style.bottom = pk[i] + '%'; }); } raf = requestAnimationFrame(loop); };
   loop();

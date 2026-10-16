@@ -90,9 +90,9 @@ function buildTabs(n, parent) {
     const t = h('div', { class: 'tab' + (id === n.active ? ' on' : ''), 'data-id': id }, p.title);
     t.addEventListener('pointerdown', e => tabDown(e, id, n, t));
     bar.append(t);
+    if (id === n.active) bar.append(h('div', { class: 'gmenu in', title: 'Panel menu', onclick: e => groupMenu(e, n, el) }, icon('menu', 15)));
   });
-  const menu = h('div', { class: 'gmenu', title: 'Panel menu', onclick: e => groupMenu(e, n, el) }, icon('menu', 14));
-  bar.append(h('div', { class: 'grow' }), menu);
+  bar.append(h('div', { class: 'grow' }));
   const body = h('div', { class: 'gbody' });
   const pe = getEl(n.active);
   if (pe) body.append(pe);

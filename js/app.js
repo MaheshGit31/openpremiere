@@ -23,6 +23,7 @@ const { tabs, split } = L;
 const WS = {
   'Learning': () => split('h', [split('v', [tabs(['learn']), tabs(['project', 'effects'])], [1, 1]), tabs(['program']), tabs(['effectControls', 'lumetri'])], [1, 1.6, 1]),
   'Assembly': () => split('v', [split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history']), tabs(['program'])], [1.2, 1]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.5, 1]),
+  'Import': () => split('h', [tabs(['mediaBrowser']), split('v', [tabs(['source']), tabs(['project'])], [1, 1.2])], [1.3, 1]),
   'Editing': () => split('v', [split('h', [tabs(['source', 'effectControls', 'mixer', 'metadata']), tabs(['program']), tabs(['meters'])], [1.1, 1.1, .08]), split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history', 'audioMonitor']), tabs(['tools']), tabs(['timeline'])], [1.1, .08, 4])], [1.2, 1]),
   'Color': () => split('h', [split('v', [split('h', [tabs(['scopes']), tabs(['program'])], [1, 1.2]), split('h', [tabs(['tools']), tabs(['timeline'])], [.06, 1])], [1.4, 1]), tabs(['lumetri', 'effectControls'])], [3, 1]),
   'Effects': () => split('v', [split('h', [tabs(['source']), tabs(['program']), tabs(['effects', 'project'])], [1, 1.2, .8]), split('h', [tabs(['effectControls']), tabs(['tools']), tabs(['timeline'])], [1, .05, 2.4])], [1.2, 1]),
@@ -42,7 +43,7 @@ function drawWs() {
     more.length ? h('div', { class: 'wst more', title: 'More workspaces', onclick: e => popMenu(e.clientX, e.clientY, more.map(n => [n, () => setWs(n)])) }, icon('more', 14)) : null,
     h('div', { class: 'grow' }), h('div', { class: 'brand' }, 'OpenPremiere'));
 }
-function setWs(n) { ls.set('ws.cur', n); setLayout(n, WS[n]()); drawWs(); }
+function setWs(n) { ls.set('ws.cur', n); setLayout(n, WS[n]()); drawWs(); if (typeof drawHeader === 'function' && document.getElementById('hdrbar')) drawHeader(); }
 
 // ---------- menus ----------
 const sel = () => selClips();
@@ -99,12 +100,29 @@ function drawMenus() {
   const mb = document.getElementById('menubar'); mb.innerHTML = '';
   const mac = plat() === 'mac';
   mb.className = mac ? 'mac' : 'win';
-  mb.append(h('div', { class: 'logo', title: 'Home', onclick: goHome }, icon('home', 14)));
   const mk = (n, items) => h('div', { class: 'mn' + (n === 'OpenPremiere' ? ' app' : ''), onclick: () => { const r = mb.querySelector('[data-mn="' + n + '"]').getBoundingClientRect(); popMenu(r.left, r.bottom, items().map(it => it === '-' ? it : [it[0], it[1] || (() => { }), fmtKey(it[2]), it[3]])); }, 'data-mn': n }, n);
   if (mac) mb.append(mk('OpenPremiere', () => [['About OpenPremiere', () => alert('OpenPremiere v0.2 - open source browser video editor')], '-', ['Preferences...', prefsDialog, 'Ctrl+,'], '-', ['Home', goHome, '']]));
   for (const n of Object.keys(MENUS)) mb.append(mk(n, MENUS[n]));
-  mb.append(h('div', { class: 'grow' }), h('div', { class: 'projname', title: 'Rename project', onclick: async () => { const n = prompt('Project name', P.projName); if (n) { P.projName = n; const { renameProject } = await import('./project.js'); await renameProject(P.projId, n); drawMenus(); } } }, P.projName),
-    h('button', { class: 'btn primary', onclick: () => exportDialog() }, 'Export'));
+  drawHeader();
+}
+let editWs = ls.get('editWs', 'Editing');
+function drawHeader() {
+  const hb = document.getElementById('hdrbar'); hb.innerHTML = '';
+  const cur = curWs(); const mode = cur === 'Import' ? 'import' : 'edit';
+  const mt = (id, label, fn) => h('div', { class: 'mode' + (id === mode ? ' on' : ''), onclick: fn }, label);
+  const ib = (name, title, fn) => h('button', { class: 'hb', title, onclick: fn }, icon(name, 20));
+  const wsMenu = e => { const r = e.currentTarget.getBoundingClientRect(); popMenu(r.left, r.bottom, WS_ORDER.filter(n => n !== 'Import').map(n => [n, () => { editWs = n; ls.set('editWs', n); setWs(n); }, '', n === cur])); };
+  const title = h('div', { class: 'hb-title', title: 'Rename project', onclick: async () => { const n = prompt('Project name', P.projName); if (n) { P.projName = n; const { renameProject } = await import('./project.js'); await renameProject(P.projId, n); drawHeader(); } } });
+  const setTitle = () => { title.textContent = P.projName + (P.history && P.history.length ? ' - Edited' : ''); };
+  setTitle(); bus.on('history', setTitle);
+  hb.append(h('button', { class: 'hb home', title: 'Home', onclick: goHome }, icon('home', 22)),
+    mt('import', 'Import', () => setWs('Import')), mt('edit', 'Edit', () => setWs(editWs)), mt('export', 'Export', () => exportDialog()),
+    h('div', { class: 'hb-mid' }, title),
+    h('div', { class: 'hb-ws', onclick: wsMenu, title: 'Workspaces' }, (cur === 'Import' ? editWs : cur).toUpperCase(), h('i', {}, icon('tarrow', 12))),
+    ib('panels', 'Show / hide panels', e => { const r = e.currentTarget.getBoundingClientRect(); popMenu(r.left, r.bottom, Object.values(panels).sort((x, y) => x.title.localeCompare(y.title)).map(p => [p.title, () => isOpen(p.id) ? closePanel(p.id) : openPanel(p.id), '', isOpen(p.id)])); }),
+    ib('share', 'Export', () => exportDialog()), ib('sliders', 'Preferences', () => prefsDialog()), ib('search', 'Search commands (Ctrl+Shift+P)', () => palette()),
+    ib('audio', 'Mute audio', e => { pb.audioInit(); const m = pb.master.gain.value > 0; pb.master.gain.value = m ? 0 : 1; e.currentTarget.classList.toggle('off', m); }),
+    ib('full', 'Full screen', () => { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => { }); }));
 }
 function prefsDialog() {
   document.querySelectorAll('.modal').forEach(m => m.remove());
@@ -113,7 +131,7 @@ function prefsDialog() {
   const m = h('div', { class: 'modal', onpointerdown: e => { if (e.target === m) m.remove(); } }, h('div', { class: 'mdl' }, h('div', { class: 'mh' }, 'Preferences'),
     h('div', { class: 'ph2' }, 'Appearance'),
     seg('Menu style', [['win', 'Windows'], ['mac', 'Mac']], plat(), v => { ls.set('platform', v); drawMenus(); }),
-    seg('Interface font size', [[12, 'Small'], [13, 'Default'], [14, 'Large']], ls.get('fs', 13), v => { ls.set('fs', v); applyPrefs(); }),
+    seg('Interface font size', [[12, 'Small'], [14, 'Default'], [15, 'Large']], ls.get('fs', 14), v => { ls.set('fs', v); applyPrefs(); }),
     h('div', { class: 'xrow' }, h('label', {}, 'Brightness'), bright),
     h('div', { class: 'ph2' }, 'Editing'),
     seg('Snapping', [[1, 'On'], [0, 'Off']], P.snap ? 1 : 0, v => { P.snap = !!+v; bus.emit('toolsync'); }),
@@ -125,7 +143,7 @@ function prefsDialog() {
 export function applyPrefs() {
   const b = ls.get('bright', 14), r = document.documentElement.style;
   r.setProperty('--pn', `hsl(0,0%,${b}%)`); r.setProperty('--bg', `hsl(0,0%,${Math.max(5, b - 5)}%)`); r.setProperty('--pn2', `hsl(0,0%,${b + 4}%)`);
-  r.setProperty('--fs', ls.get('fs', 13) + 'px');
+  r.setProperty('--fs', ls.get('fs', 14) + 'px');
 }
 applyPrefs();
 
@@ -285,3 +303,30 @@ addEventListener('keydown', e => {
   if (k === 'p' && e.shiftKey) { e.preventDefault(); palette(); }
   else if (k === 'f' && !e.shiftKey && !(e.target.tagName === 'INPUT')) { e.preventDefault(); import('./panels1.js').then(m => m.focusProjectSearch()); }
 }, true);
+
+// ---------- status bar (tool hint, like Premiere) ----------
+const HINTS = {
+  v: 'Click to select, or click in empty space and drag to marquee select. Use Shift, Alt and Ctrl for other options.',
+  a: 'Click to select all clips to the right of the clicked clip on the same track. Use Shift to select on all tracks.',
+  sa: 'Click to select all clips to the left of the clicked clip on the same track.',
+  b: 'Click and drag a clip edge to trim it and ripple the following clips.',
+  n: 'Drag the edit point between two clips to trim both at once.',
+  r: 'Drag a clip edge to change its speed so it fits the new duration.',
+  c: 'Click on a clip to cut it at that point. Hold Shift to cut all tracks.',
+  y: 'Drag a clip to slip its source in and out points without changing its position.',
+  u: 'Drag a clip to slide it and trim its neighbours.',
+  p: 'Click to add a keyframe. Drag a keyframe or a rubber band segment to change values.',
+  rect: 'Drag in the Program Monitor to draw a rectangle. Hold Shift to constrain proportions.',
+  ellipse: 'Drag in the Program Monitor to draw an ellipse. Hold Shift for a circle.',
+  poly: 'Drag in the Program Monitor to draw a polygon.',
+  om_obj: 'Click an object in the Program Monitor to create a mask around it.',
+  om_ellipse: 'Drag over a clip in the Program Monitor to draw an ellipse mask.',
+  om_rect: 'Drag over a clip in the Program Monitor to draw a rectangle mask.',
+  om_pen: 'Click points over a clip to draw a custom mask. Press Enter to finish.',
+  h: 'Click and drag to scroll the timeline.',
+  z: 'Click to zoom in the timeline. Hold Alt to zoom out.',
+  t: 'Click in the Program Monitor to add text. Drag to create a text box.',
+};
+const sbar = document.getElementById('statusbar');
+const drawStatus = () => { if (sbar) sbar.textContent = HINTS[P.tool] || HINTS.v; };
+bus.on('tool', drawStatus); drawStatus();
