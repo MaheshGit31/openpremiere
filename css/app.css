@@ -319,3 +319,12 @@ input,textarea,[contenteditable],.gtxt{user-select:text;-webkit-user-select:text
 .mscale{left:auto;right:0;width:26px;font-size:11px;color:#b0b0b0}.mscale span{right:auto;left:4px}
 .mbar2{background:#161616}
 .msolo{display:flex;gap:4px;justify-content:center;padding-top:6px;padding-right:28px}.msolo button{flex:1;height:18px;border:0;background:#2e2e2e;color:#999;border-radius:3px;font-size:11px;cursor:pointer}.msolo button:hover{color:#fff}
+
+.hb-home{color:#e8e8e8}
+#menubar .topx{background:none;border:0;width:24px;height:22px;display:grid;place-items:center;cursor:pointer;border-radius:3px;color:#555}
+#menubar.mac .topx{color:#aaa}#menubar .topx:hover{background:#0002;color:#000}#menubar.mac .topx:hover{background:#fff2;color:#fff}
+#tophot{position:fixed;left:0;right:0;top:0;height:6px;z-index:390;display:none}
+#app.topc #tophot{display:block}
+#app.topc #menubar,#app.topc #hdrbar{position:fixed;left:0;right:0;z-index:400;transform:translateY(-110%);transition:transform .16s ease;box-shadow:0 8px 24px #000a}
+#app.topc #menubar{top:0}#app.topc #hdrbar{top:24px;background:#1d1d1d}
+#app.topc.peek #menubar,#app.topc.peek #hdrbar{transform:none}
