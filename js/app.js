@@ -1,6 +1,7 @@
-import { P, h, bus, ls, tc, hist, seqDur, selClips, findClip } from './core.js';
+import { P, h, bus, ls, tc, hist, seqDur, selClips, findClip, setSeq } from './core.js';
 import { panels, initDock, setLayout, resetLayout, L, popMenu, openPanel, closePanel, isOpen, curWs, maxHovered } from './dock.js';
-import './timeline.js'; import './panels1.js'; import './panels2.js';
+import './fxlib1.js'; import './fxlib2.js'; import './fxlib3.js';
+import './timeline.js'; import './panels1.js'; import './panels2.js'; import './gfxpanel.js';
 import { pb } from './playback.js';
 import { setTool, newSequence, newBin, openSource, src } from './panels1.js';
 import { importFiles, pickFiles, makeBars, makeSolid } from './media.js';
@@ -9,6 +10,11 @@ import { tl } from './timeline.js';
 import { SHORTCUTS } from './panels2.js';
 import { icon } from './icons.js';
 import { exportDialog } from './export.js';
+import { mountHome } from './home.js';
+import { newProject, openProject, saveProject, startAutosave } from './project.js';
+import { db } from './db.js';
+import './shortcuts2.js';
+import './amonitor.js';
 
 window.OP_openPanel = openPanel;
 const { tabs, split } = L;
@@ -17,11 +23,11 @@ const { tabs, split } = L;
 const WS = {
   'Learning': () => split('h', [split('v', [tabs(['learn']), tabs(['project', 'effects'])], [1, 1]), tabs(['program']), tabs(['effectControls', 'lumetri'])], [1, 1.6, 1]),
   'Assembly': () => split('v', [split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history']), tabs(['program'])], [1.2, 1]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.5, 1]),
-  'Editing': () => split('v', [split('h', [tabs(['source', 'effectControls', 'mixer', 'metadata']), tabs(['program']), tabs(['meters'])], [1.1, 1.1, .08]), split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history']), tabs(['tools']), tabs(['timeline'])], [1.1, .08, 4])], [1.2, 1]),
+  'Editing': () => split('v', [split('h', [tabs(['source', 'effectControls', 'mixer', 'metadata']), tabs(['program']), tabs(['meters'])], [1.1, 1.1, .08]), split('h', [tabs(['project', 'mediaBrowser', 'libraries', 'info', 'effects', 'markers', 'history', 'audioMonitor']), tabs(['tools']), tabs(['timeline'])], [1.1, .08, 4])], [1.2, 1]),
   'Color': () => split('h', [split('v', [split('h', [tabs(['scopes']), tabs(['program'])], [1, 1.2]), split('h', [tabs(['tools']), tabs(['timeline'])], [.06, 1])], [1.4, 1]), tabs(['lumetri', 'effectControls'])], [3, 1]),
   'Effects': () => split('v', [split('h', [tabs(['source']), tabs(['program']), tabs(['effects', 'project'])], [1, 1.2, .8]), split('h', [tabs(['effectControls']), tabs(['tools']), tabs(['timeline'])], [1, .05, 2.4])], [1.2, 1]),
-  'Audio': () => split('v', [split('h', [tabs(['mixer', 'effectControls']), tabs(['program']), tabs(['meters'])], [1.4, 1, .15]), split('h', [tabs(['project', 'effects']), tabs(['tools']), tabs(['timeline'])], [.9, .06, 3])], [1.1, 1]),
-  'Captions and Graphics': () => split('v', [split('h', [tabs(['project', 'effects']), tabs(['program']), tabs(['effectControls', 'lumetri'])], [1, 1.5, 1]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.4, 1]),
+  'Audio': () => split('v', [split('h', [tabs(['mixer', 'effectControls']), tabs(['program']), tabs(['meters','audioMonitor'])], [1.4, 1, .5]), split('h', [tabs(['project', 'effects']), tabs(['tools']), tabs(['timeline'])], [.9, .06, 3])], [1.1, 1]),
+  'Captions and Graphics': () => split('v', [split('h', [tabs(['project', 'effects']), tabs(['program']), tabs(['essentialGraphics', 'effectControls', 'lumetri'])], [1, 1.5, 1]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.4, 1]),
   'Review': () => split('v', [tabs(['program']), tabs(['timeline'])], [2.2, 1]),
   'Libraries': () => split('v', [split('h', [tabs(['libraries', 'project']), tabs(['program'])], [1, 1.2]), split('h', [tabs(['tools']), tabs(['timeline'])], [.04, 1])], [1.4, 1]),
   'Metadata Logging': () => split('h', [split('v', [tabs(['project']), tabs(['metadata', 'info'])], [1.3, 1]), tabs(['source']), tabs(['markers', 'history'])], [1.2, 1.3, .9]),
@@ -42,14 +48,15 @@ function setWs(n) { ls.set('ws.cur', n); setLayout(n, WS[n]()); drawWs(); }
 const sel = () => selClips();
 const MENUS = {
   File: () => [
-    ['New Sequence…', () => newSequence(), 'Ctrl+N'], ['New Bin', () => newBin(), 'Ctrl+/'], '-',
-    ['Import…', pickFiles, 'Ctrl+I'], '-',
+    ['New Project...', () => newDialog(), 'Ctrl+Alt+N'], ['Open Project...', () => goHome(), 'Ctrl+O'], ['New Sequence...', () => newSequence(), 'Ctrl+N'], ['New Bin', () => newBin(), 'Ctrl+/'], '-',
+    ['Import...', pickFiles, 'Ctrl+I'], '-',
     ['Export Media…', () => exportDialog(), 'Ctrl+M'], ['Export Frame', () => document.querySelector('[title^="Export Frame"]')?.click(), 'Ctrl+Shift+E'], '-',
-    ['Save Project (local)', saveProject, 'Ctrl+S'],
+    ['Save Project', () => saveProject(true), 'Ctrl+S'], ['Close Project', () => goHome(), ''],
   ],
   Edit: () => [
     ['Undo', () => hist.undo(), 'Ctrl+Z'], ['Redo', () => hist.redo(), 'Ctrl+Shift+Z'], '-',
     ['Copy', copy, 'Ctrl+C'], ['Paste', paste, 'Ctrl+V'], ['Paste Insert', () => paste(true), 'Ctrl+Shift+V'], ['Clear', () => E.removeClips(P.sel), 'Delete'], ['Ripple Delete', () => E.removeClips(P.sel, true), 'Shift+Del'], ['Duplicate', dup, 'Ctrl+Alt+D'], '-',
+    ['Preferences...', prefsDialog, 'Ctrl+,'], '-',
     ['Select All', () => { P.sel = []; for (const t of [...P.seq.v, ...P.seq.a]) t.clips.forEach(c => P.sel.push(c.id)); bus.emit('select'); tl.redraw(); }, 'Ctrl+A'], ['Deselect All', () => { P.sel = []; bus.emit('select'); tl.redraw(); }, 'Ctrl+Shift+A'],
   ],
   Clip: () => [
@@ -67,7 +74,7 @@ const MENUS = {
     ['Mark In', () => { P.inP = P.t; bus.emit('seq'); }, 'I'], ['Mark Out', () => { P.outP = P.t; bus.emit('seq'); }, 'O'], ['Mark Clip', markClip, 'X'], ['Clear In and Out', () => { P.inP = P.outP = null; bus.emit('seq'); }, 'Ctrl+Shift+X'], '-',
     ['Add Marker', () => tl.addMarker(), 'M'], ['Clear All Markers', () => { P.markers = []; bus.emit('markers'); tl.redraw(); }, ''],
   ],
-  Graphics: () => [['New Text Layer', () => import('./titles.js').then(m => m.addTitle()), 'Ctrl+T']],
+  'Graphics and Titles': () => [['New Text Layer', () => import('./gfx.js').then(m => m.addNewText()), 'Ctrl+T'], ['New Rectangle', () => import('./gfx.js').then(m => m.addShape('rect')), ''], ['New Ellipse', () => import('./gfx.js').then(m => m.addShape('ellipse')), ''], '-', ['Title Templates', () => { openPanel('essentialGraphics'); }, ''], ['Essential Graphics Panel', () => isOpen('essentialGraphics') ? closePanel('essentialGraphics') : openPanel('essentialGraphics'), '', isOpen('essentialGraphics')]],
   View: () => [
     ['Snap in Timeline', () => { P.snap = !P.snap; bus.emit('toolsync'); }, 'S', P.snap], ['Zoom In', () => tl.setZoom(P.zoom * 1.4), '='], ['Zoom Out', () => tl.setZoom(P.zoom / 1.4), '-'], ['Zoom to Fit', () => tl.fitZoom(), '\\'],
     '-', ['Loop Playback', () => { pb.loop = !pb.loop; }, '', pb.loop],
@@ -78,15 +85,80 @@ const MENUS = {
   ],
   Help: () => [['Keyboard Shortcuts', () => openPanel('learn')], ['About OpenPremiere', () => alert('OpenPremiere v0.1 — open source browser video editor')]],
 };
+const IS_MAC_DEFAULT = /Mac|iPhone|iPad/.test(navigator.platform || '');
+export const plat = () => ls.get('platform', IS_MAC_DEFAULT ? 'mac' : 'win');
+export function fmtKey(k) {
+  if (!k) return '';
+  if (plat() !== 'mac') return k;
+  const parts = k.split('+'); let key = parts.pop(); const m = new Set(parts);
+  const map = { Del: '\u232B', Delete: '\u232B', Left: '\u2190', Right: '\u2192', Up: '\u2191', Down: '\u2193', Enter: '\u21A9' };
+  key = map[key] || key;
+  return (m.has('Alt') ? '\u2325' : '') + (m.has('Shift') ? '\u21E7' : '') + (m.has('Ctrl') ? '\u2318' : '') + key;
+}
 function drawMenus() {
   const mb = document.getElementById('menubar'); mb.innerHTML = '';
-  mb.append(h('div', { class: 'logo' }, 'Pr'));
-  for (const n of Object.keys(MENUS)) {
-    const m = h('div', { class: 'mn', onclick: e => { const r = m.getBoundingClientRect(); const items = MENUS[n]().map(it => it === '-' ? it : [it[0], it[1], it[2], it[3]]); const pm = popMenu(r.left, r.bottom, items.map(it => it === '-' ? it : [it[0], it[1] || (() => { }), it[2], it[3]])); pm.querySelectorAll('.mi').forEach((el, i) => { }); } }, n);
-    mb.append(m);
-  }
-  mb.append(h('div', { class: 'grow' }), h('div', { class: 'projname' }, 'Untitled'),
+  const mac = plat() === 'mac';
+  mb.className = mac ? 'mac' : 'win';
+  mb.append(h('div', { class: 'logo', title: 'Home', onclick: goHome }, icon('home', 14)));
+  const mk = (n, items) => h('div', { class: 'mn' + (n === 'OpenPremiere' ? ' app' : ''), onclick: () => { const r = mb.querySelector('[data-mn="' + n + '"]').getBoundingClientRect(); popMenu(r.left, r.bottom, items().map(it => it === '-' ? it : [it[0], it[1] || (() => { }), fmtKey(it[2]), it[3]])); }, 'data-mn': n }, n);
+  if (mac) mb.append(mk('OpenPremiere', () => [['About OpenPremiere', () => alert('OpenPremiere v0.2 - open source browser video editor')], '-', ['Preferences...', prefsDialog, 'Ctrl+,'], '-', ['Home', goHome, '']]));
+  for (const n of Object.keys(MENUS)) mb.append(mk(n, MENUS[n]));
+  mb.append(h('div', { class: 'grow' }), h('div', { class: 'projname', title: 'Rename project', onclick: async () => { const n = prompt('Project name', P.projName); if (n) { P.projName = n; const { renameProject } = await import('./project.js'); await renameProject(P.projId, n); drawMenus(); } } }, P.projName),
     h('button', { class: 'btn primary', onclick: () => exportDialog() }, 'Export'));
+}
+function prefsDialog() {
+  document.querySelectorAll('.modal').forEach(m => m.remove());
+  const seg = (label, opts, cur, on) => h('div', { class: 'xrow' }, h('label', {}, label), h('div', { class: 'seg' }, opts.map(([v, l]) => h('button', { class: 'segb' + (String(cur) === String(v) ? ' on' : ''), onclick: e => { on(v); e.target.parentElement.querySelectorAll('.segb').forEach(b => b.classList.toggle('on', b === e.target)); } }, l))));
+  const bright = h('input', { type: 'range', min: 10, max: 38, value: ls.get('bright', 14), class: 'psl', oninput: e => { ls.set('bright', +e.target.value); applyPrefs(); } });
+  const m = h('div', { class: 'modal', onpointerdown: e => { if (e.target === m) m.remove(); } }, h('div', { class: 'mdl' }, h('div', { class: 'mh' }, 'Preferences'),
+    h('div', { class: 'ph2' }, 'Appearance'),
+    seg('Menu style', [['win', 'Windows'], ['mac', 'Mac']], plat(), v => { ls.set('platform', v); drawMenus(); }),
+    seg('Interface font size', [[12, 'Small'], [13, 'Default'], [14, 'Large']], ls.get('fs', 13), v => { ls.set('fs', v); applyPrefs(); }),
+    h('div', { class: 'xrow' }, h('label', {}, 'Brightness'), bright),
+    h('div', { class: 'ph2' }, 'Editing'),
+    seg('Snapping', [[1, 'On'], [0, 'Off']], P.snap ? 1 : 0, v => { P.snap = !!+v; bus.emit('toolsync'); }),
+    seg('Loop playback', [[0, 'Off'], [1, 'On']], pb.loop ? 1 : 0, v => { pb.loop = !!+v; }),
+    h('div', { class: 'xrow' }, h('label', {}, 'Workspace'), h('button', { class: 'btn', onclick: () => resetLayout(curWs(), WS[curWs()]()) }, 'Reset current layout')),
+    h('div', { class: 'mf' }, h('button', { class: 'btn primary', onclick: () => m.remove() }, 'Done'))));
+  document.body.append(m);
+}
+export function applyPrefs() {
+  const b = ls.get('bright', 14), r = document.documentElement.style;
+  r.setProperty('--pn', `hsl(0,0%,${b}%)`); r.setProperty('--bg', `hsl(0,0%,${Math.max(5, b - 5)}%)`); r.setProperty('--pn2', `hsl(0,0%,${b + 4}%)`);
+  r.setProperty('--fs', ls.get('fs', 13) + 'px');
+}
+applyPrefs();
+
+// ---------- home / project routing ----------
+const homeEl = document.getElementById('home'), appEl = document.getElementById('app');
+let homeApi = null;
+const showHome = () => { homeEl.hidden = false; appEl.hidden = true; document.title = 'OpenPremiere'; if (homeApi) homeApi.reload(); };
+const showEditor = () => { homeEl.hidden = true; appEl.hidden = false; drawMenus(); drawWs(); setTimeout(() => { bus.emit('resize'); tl.fitZoom(); pb.invalidate(); }, 60); };
+export async function goHome() { pb.pause(); await saveProject(true); history.replaceState(null, '', '#/home'); showHome(); }
+async function openById(id) { if (await openProject(id)) { history.replaceState(null, '', '#/edit/' + id); document.title = P.projName + ' - OpenPremiere'; showEditor(); startAutosave(); } else showHome(); }
+async function createProject(o) { const id = await newProject(o); history.replaceState(null, '', '#/edit/' + id); showEditor(); startAutosave(); return id; }
+function newDialog() {
+  document.querySelectorAll('.modal').forEach(m => m.remove());
+  const name = h('input', { class: 'nvi wide', value: 'Untitled' });
+  const w = h('input', { type: 'number', class: 'nvi', value: 1920 }), hh = h('input', { type: 'number', class: 'nvi', value: 1080 }), f = h('input', { type: 'number', class: 'nvi', value: 30 });
+  const pre = h('select', { class: 'msel wide', onchange: e => { const [a, b, c] = e.target.value.split('x').map(Number); w.value = a; hh.value = b; f.value = c; } }, [['1920x1080x30', 'HD 1080p 30'], ['1920x1080x60', 'HD 1080p 60'], ['3840x2160x30', '4K UHD 30'], ['1080x1920x30', 'Vertical 9:16'], ['1080x1080x30', 'Square 1:1'], ['2048x858x24', 'Cinema 2.39:1 24'], ['1280x720x30', 'HD 720p 30']].map(([v, l]) => h('option', { value: v }, l)));
+  const row = (l, ...e) => h('div', { class: 'xrow' }, h('label', {}, l), ...e);
+  const m = h('div', { class: 'modal', onpointerdown: e => { if (e.target === m) m.remove(); } }, h('div', { class: 'mdl' }, h('div', { class: 'mh' }, 'New project'),
+    row('Name', name), row('Preset', pre), row('Frame size', w, h('span', {}, 'x'), hh), row('Frame rate', f),
+    h('div', { class: 'mf' }, h('button', { class: 'btn', onclick: () => m.remove() }, 'Cancel'), h('button', { class: 'btn primary', onclick: () => { m.remove(); createProject({ name: name.value || 'Untitled', w: +w.value || 1920, h: +hh.value || 1080, fps: +f.value || 30 }); } }, 'Create'))));
+  document.body.append(m); name.select();
+}
+function startFromMedia() {
+  const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.accept = 'video/*,audio/*,image/*';
+  i.onchange = async () => {
+    const files = [...i.files]; if (!files.length) return;
+    await createProject({ name: files[0].name.replace(/\.[^.]+$/, '') });
+    const its = await importFiles(files);
+    const v = its.find(x => x.kind === 'video' && x.w);
+    if (v) { P.seq.w = v.w; P.seq.h = v.h; E.placeItem(v, { at: 0 }); } else if (its[0]) E.placeItem(its[0], { at: 0 });
+    bus.emit('seq'); setTimeout(() => tl.fitZoom(), 100);
+  };
+  i.click();
 }
 
 // ---------- commands ----------
@@ -111,7 +183,6 @@ function addTracks() { const n = +prompt('Add how many video & audio tracks?', '
 function delTrack() { const s = P.seq; if (s.v.length > 1 && s.v[s.v.length - 1].clips.length === 0) s.v.pop(); if (s.a.length > 1 && s.a[s.a.length - 1].clips.length === 0) s.a.pop(); bus.emit('seq'); }
 function nav(dir) { const pts = E.editPoints(); const t = P.t; const n = dir > 0 ? pts.find(p => p > t + 1e-4) : [...pts].reverse().find(p => p < t - 1e-4); if (n != null) pb.seek(n); }
 function markClip() { const c = sel()[0]; if (!c) return; P.inP = c.start; P.outP = c.start + c.dur; bus.emit('seq'); }
-function saveProject() { const o = { seqs: P.seqs, markers: P.markers, items: P.items.map(i => ({ ...i, file: undefined, url: i.solid ? i.url : null })) }; ls.set('proj', o); alert('Saved project metadata locally (media files must be re-imported)'); }
 
 // ---------- keyboard ----------
 const typing = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
@@ -125,16 +196,18 @@ addEventListener('keydown', e => {
     if (L_ === 'z') sh ? hist.redo() : hist.undo();
     else if (L_ === 'y') hist.redo();
     else if (L_ === 'k') E.split(P.t);
-    else if (L_ === 'c') copy(); else if (L_ === 'v') paste(sh); else if (L_ === 'd' && e.altKey) dup();
+    else if (L_ === 'c') copy(); else if (L_ === 'v') paste(sh); else if (L_ === 'd') { if (e.altKey) dup(); else if (sh) E.applyDefaultTransition('a'); else E.applyDefaultTransition('v'); }
     else if (L_ === 'a') { P.sel = []; for (const t of [...P.seq.v, ...P.seq.a]) t.clips.forEach(c => P.sel.push(c.id)); bus.emit('select'); tl.redraw(); }
     else if (L_ === 'i') pickFiles();
-    else if (L_ === 'n') newSequence();
+    else if (L_ === 'n') { if (e.altKey) newDialog(); else newSequence(); }
     else if (L_ === 'm') exportDialog();
     else if (L_ === 'l') linkToggle();
     else if (L_ === 'r') speedDlg();
-    else if (L_ === 's') saveProject();
+    else if (L_ === 's') { saveProject(true); if (sh) { const n = prompt('Save project as', P.projName + ' copy'); if (n) { P.projName = n; saveProject(true); } } }
+    else if (L_ === ',') prefsDialog();
+    else if (L_ === 'o') goHome();
     else if (L_ === 'e' && sh) document.querySelector('[title^="Export Frame"]')?.click();
-    else if (L_ === 't') import('./titles.js').then(m => m.addTitle());
+    else if (L_ === 't') import('./gfx.js').then(m => m.addNewText());
     else used = false;
   } else switch (L_) {
     case ' ': pb.toggle(); break;
@@ -154,8 +227,10 @@ addEventListener('keydown', e => {
     case '.': src.insert('overwrite'); break;
     case ';': E.liftExtract(false); break;
     case "'": E.liftExtract(true); break;
-    case 'Delete': case 'Backspace': if (P.sel.length) E.removeClips(P.sel, sh); break;
-    case 'v': case 'a': case 'b': case 'r': case 'c': case 'y': case 'p': case 'h': case 'z': case 't': setTool(L_); break;
+    case 'd': if (sh) { E.applyDefaultTransition('v'); E.applyDefaultTransition('a'); } else used = false; break;
+    case 'Delete': case 'Backspace': if (P.selTr && !P.sel.length) { E.removeTransition(P.selTr.id, P.selTr.side); break; } if (P.sel.length) E.removeClips(P.sel, sh); break;
+    case 'a': setTool(sh ? 'sa' : 'a'); break;
+    case 'v': case 'b': case 'n': case 'u': case 'r': case 'c': case 'y': case 'p': case 'h': case 'z': case 't': setTool(L_); break;
     case 's': P.snap = !P.snap; bus.emit('toolsync'); break;
     case 'm': tl.addMarker(); break;
     case '\\': tl.fitZoom(); break;
@@ -175,9 +250,38 @@ addEventListener('drop', e => { if (e.dataTransfer.files.length && !e.defaultPre
 
 // ---------- boot ----------
 initDock(document.getElementById('dock'));
-newSequence('Sequence 01');
-drawMenus();
+P.history = [];
+homeApi = mountHome(homeEl, { open: openById, create: createProject, newDialog, prefs: prefsDialog, quick: startFromMedia });
+window.OPX = { setTool, P, pb, E, bus, setWs, openSource, importFiles, makeBars, createProject, openById, goHome, db };
 setWs(ls.get('ws.cur', 'Editing'));
 document.body.dataset.tool = 'v';
-P.history = []; bus.emit('history');
-window.OPX = { P, pb, E, bus, setWs, openSource, importFiles, makeBars };
+const m = location.hash.match(/^#\/edit\/(.+)$/);
+if (m) openById(m[1]); else showHome();
+// block accidental text selection and image dragging outside of inputs
+addEventListener('selectstart', e => { if (!typing(e.target) && !(e.target.closest && e.target.closest('.selectable'))) e.preventDefault(); });
+addEventListener('dragstart', e => { if (e.target.tagName === 'IMG' || e.target.tagName === 'CANVAS') e.preventDefault(); });
+
+// ---------- command palette (Ctrl+Shift+P) and project find (Ctrl+F) ----------
+function palette() {
+  if (document.querySelector('.pal')) return;
+  const cmds = [];
+  for (const [m, fn] of Object.entries(MENUS)) { try { fn().forEach(x => { if (Array.isArray(x) && x[1]) cmds.push({ n: x[0].replace('…', '...'), g: m, run: x[1], k: x[2] || '' }); }); } catch (e) { } }
+  P.items.filter(i => !i.gfxItem).forEach(i => cmds.push({ n: i.name, g: 'Media', run: () => openSource(i), k: '' }));
+  P.seqs.forEach(s => cmds.push({ n: s.name, g: 'Sequence', run: () => setSeq(s), k: '' }));
+  WS_ORDER.forEach(n => cmds.push({ n: 'Workspace: ' + n, g: 'Workspace', run: () => setWs(n), k: '' }));
+  import('./fx.js').then(() => 0);
+  const ov = h('div', { class: 'pal', onclick: e => { if (e.target === ov) ov.remove(); } });
+  const inp = h('input', { placeholder: 'Type a command, clip, sequence or workspace' }); const res = h('div', { class: 'res' });
+  let idx = 0, list = [];
+  const draw = () => { const q = inp.value.toLowerCase().trim(); list = cmds.filter(c => !q || c.n.toLowerCase().includes(q) || c.g.toLowerCase().includes(q)).slice(0, 40); idx = Math.min(idx, Math.max(0, list.length - 1)); res.innerHTML = ''; list.forEach((c, i) => res.append(h('div', { class: 'it' + (i === idx ? ' on' : ''), onclick: () => run(c) }, h('div', {}, c.n), h('span', {}, c.k || c.g)))); };
+  const run = c => { ov.remove(); setTimeout(() => c.run(), 20); };
+  inp.addEventListener('input', () => { idx = 0; draw(); });
+  inp.addEventListener('keydown', e => { if (e.key === 'Escape') ov.remove(); else if (e.key === 'ArrowDown') { idx = Math.min(list.length - 1, idx + 1); draw(); e.preventDefault(); } else if (e.key === 'ArrowUp') { idx = Math.max(0, idx - 1); draw(); e.preventDefault(); } else if (e.key === 'Enter' && list[idx]) run(list[idx]); e.stopPropagation(); });
+  ov.append(h('div', { class: 'box' }, inp, res)); document.body.append(ov); inp.focus(); draw();
+}
+addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'p' && e.shiftKey) { e.preventDefault(); palette(); }
+  else if (k === 'f' && !e.shiftKey && !(e.target.tagName === 'INPUT')) { e.preventDefault(); import('./panels1.js').then(m => m.focusProjectSearch()); }
+}, true);

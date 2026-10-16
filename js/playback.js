@@ -2,6 +2,9 @@ import { P, bus, seqDur, clamp, findClip } from './core.js';
 import { elFor, allEls, item } from './media.js';
 import { Compositor } from './gl.js';
 import { val } from './fx.js';
+import { transRegion } from './trans.js';
+import { gfxCanvas } from './gfx.js';
+import { chainFor, updateChain, audioTransGain, audioClipsAt } from './afx.js';
 
 export const pb = {
   comp: null, cv: null, rate: 0, q: 1, loop: false,
@@ -41,25 +44,42 @@ export const pb = {
   get seq() { return P.seq; },
   invalidate() { if (this._inv) return; this._inv = requestAnimationFrame(() => { this._inv = 0; this.render(); }); },
 
-  clipAt(tr, t) { return tr.clips.find(c => t >= c.start - 1e-6 && t < c.start + c.dur - 1e-6); },
-  speed(c) { const f = (c.fx || []).find(x => x.type === 'time'); return f ? (f.p.speed / 100) : 1; },
-  srcT(c, t) { const sp = this.speed(c); return c.in + (t - c.start) * sp; },
+  // active video transition on a track at time t
+  transAt(tr, t) {
+    for (const c of tr.clips) for (const side of ['tin', 'tout']) {
+      const r = transRegion(tr, c, side);
+      if (r && t >= r.r0 && t < r.r1) return { a: r.a, b: r.b, p: (t - r.r0) / (r.r1 - r.r0), tr: r.x };
+    }
+    return null;
+  },
+  clipAt(tr, t) { return tr.clips.find(c => !c.off && t >= c.start - 1e-6 && t < c.start + c.dur - 1e-6); },
+  speed(c) { const f = (c.fx || []).find(x => x.type === 'time'); const w = (c.fx || []).find(x => x.type === 'timeWarp' && x.on !== false); return (f ? (f.p.speed / 100) : 1) * (w ? (+w.p.speed || 100) / 100 : 1); },
+  posterized(c) { return (c.fx || []).some(x => x.type === 'posterizeTime' && x.on !== false); },
+  srcT(c, t) {
+    const sp = this.speed(c); let lt = t - c.start;
+    const pz = (c.fx || []).find(x => x.type === 'posterizeTime' && x.on !== false); if (pz) { const r = Math.max(1, +pz.p.rate || 12); lt = Math.floor(lt * r + 1e-6) / r; }
+    return c.in + lt * sp;
+  },
 
   // sync a media element with the timeline
   sync(c, it, t, playing, tr, soloAny) {
+    if (c.gfx) return gfxCanvas(c, P.seq.w, P.seq.h, Math.max(0, t - c.start));
     const el = elFor(c, it);
     if (!el.__seek) { el.__seek = 1; el.addEventListener('seeked', () => this.invalidate()); el.addEventListener('loadeddata', () => this.invalidate()); }
     if (el.tagName === 'IMG') return el;
     const want = this.srcT(c, t), sp = this.speed(c) * (this.rate && Math.abs(this.rate) > 1 ? Math.abs(this.rate) : 1);
     if (c.type === 'a') {
-      this.hook(el);
+      this.audioInit();
       const mute = tr.mute || (soloAny && !tr.solo);
       let vol = (c.vol == null ? 1 : c.vol);
       const vf = (c.fx || []).find(x => x.type === 'avol');
       if (vf) vol *= Math.pow(10, val(c, vf, 'db', t - c.start) / 20);
-      el.volume = mute ? 0 : clamp(vol * (tr.vol == null ? 1 : tr.vol), 0, 1);
+      vol *= (tr.vol == null ? 1 : tr.vol);
+      const ch = chainFor(this, el, c);
+      if (ch) { el.volume = 1; updateChain(ch, c, t - c.start, val, mute ? 0 : vol, audioTransGain(tr, c, t), this.ac); }
+      else { this.hook(el); el.volume = mute ? 0 : clamp(vol, 0, 1); }
     }
-    if (playing && this.rate > 0) {
+    if (playing && this.rate > 0 && !this.posterized(c)) {
       if (el.paused || Math.abs(el.currentTime - want) > .3) { try { el.currentTime = want; } catch {} }
       el.playbackRate = clamp(sp, .0625, 16);
       if (el.paused) el.play().catch(() => {});
@@ -77,27 +97,50 @@ export const pb = {
     const active = new Set();
     // audio
     for (const tr of s.a) {
-      const c = this.clipAt(tr, t);
-      if (c && !tr.mute) { const it = item(c.item); if (it) { active.add(c.id); this.sync(c, it, t, playing, tr, soloAny); } }
+      if (tr.mute) continue;
+      for (const c of audioClipsAt(tr, t)) { const it = item(c.item); if (it) { active.add(c.id); this.sync(c, it, t, playing, tr, soloAny); } }
     }
     const comp = this.comp;
     if (comp) {
-      const W = s.w, H = s.h;
-      comp.resize(Math.round(W * this.q), Math.round(H * this.q));
-      const g = comp.g;
-      g.viewport(0, 0, comp.cv.width, comp.cv.height);
-      g.useProgram(comp.pr); g.clearColor(0, 0, 0, 1); g.clear(g.COLOR_BUFFER_BIT);
+      const W = s.w, H = s.h, qW = Math.round(W * this.q), qH = Math.round(H * this.q);
+      comp.resize(qW, qH);
+      comp.begin(qW, qH);
+      const ready = (el) => el.tagName === 'CANVAS' ? true : el.tagName === 'IMG' ? el.complete && el.naturalWidth : el.readyState >= 2;
+      const q = this.q;
+      const mkLayer = (c, tr, tt, play) => {
+        const it = item(c.item); if (!it) return null;
+        tt = clamp(tt, c.start, c.start + c.dur - .5 / s.fps);
+        active.add(c.id);
+        const el = this.sync(c, it, tt, play, tr, soloAny);
+        if (!ready(el)) return null;
+        const sw = it.w || el.videoWidth, sh = it.h || el.videoHeight;
+        let matte = null;
+        const tm = (c.fx || []).find(f => f.type === 'trackMatte' && f.on !== false);
+        if (tm) {
+          const mt = s.v[Math.round(val(c, tm, 'track', tt - c.start)) - 1], mc = mt && this.clipAt(mt, tt), mi = mc && item(mc.item);
+          if (mc && mi && mc !== c) { const me = this.sync(mc, mi, tt, play, mt, soloAny); if (ready(me)) { const r = comp.layer(mc, me, mi.w || me.videoWidth, mi.h || me.videoHeight, tt, qW, qH, { q }); if (r) matte = r.layer; } }
+        }
+        const r = comp.layer(c, el, sw, sh, tt, qW, qH, { matte, q });
+        if (matte && matte.k) comp.release(matte);
+        return r;
+      };
+      const rel = r => { if (r && r.layer && r.layer.k && !r.layer.keep) comp.release(r.layer); };
       for (const tr of s.v) {
         if (tr.mute) continue;
+        const tx = this.transAt(tr, t);
+        if (tx) {
+          const la = tx.a ? mkLayer(tx.a, tr, t, playing && t < tx.a.start + tx.a.dur) : null;
+          const lb = tx.b ? mkLayer(tx.b, tr, t, playing && t >= tx.b.start) : null;
+          const out = comp.transition(tx.tr, la, lb, tx.p, qW, qH, t);
+          rel(la); rel(lb);
+          if (out) { comp.blendLayer(out, 1, 0); comp.release(out); }
+          continue;
+        }
         const c = this.clipAt(tr, t); if (!c) continue;
-        const it = item(c.item); if (!it) continue;
-        active.add(c.id);
-        const el = this.sync(c, it, t, playing, tr, soloAny);
-        const ready = el.tagName === 'IMG' ? el.complete && el.naturalWidth : el.readyState >= 2;
-        if (!ready) continue;
-        const sw = it.w || el.videoWidth, sh = it.h || el.videoHeight;
-        comp.drawClip(c, el, sw, sh, t, W, H);
+        const r = mkLayer(c, tr, t, playing);
+        if (r) { comp.blendLayer(r.layer, r.op, r.mode); rel(r); }
       }
+      comp.end();
     }
     // pause everything not active
     for (const [id, el] of allEls()) if (!active.has(id) && el.pause && !el.paused) el.pause();

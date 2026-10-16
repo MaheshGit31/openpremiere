@@ -1,19 +1,26 @@
-import { P, h, bus, tc, dur, uid, clamp, newSeq, hist, seqDur, selClips } from './core.js';
+import { P, h, bus, setSeq, tc, dur, uid, clamp, newSeq, hist, seqDur, selClips } from './core.js';
 import { reg, popMenu } from './dock.js';
 import { item, pickFiles, importFiles, makeBars, makeSolid, elFor } from './media.js';
 import { pb } from './playback.js';
 import * as E from './edit.js';
 import { icon } from './icons.js';
+import { ls } from './core.js';
+import { toolDown, drawToolOv, GT, endEdit } from './gfxtools.js';
 
 // ---------------- Project ----------------
-let projEl, projBody, projPath = 'root', projView = 'icon', projQ = '';
+let projEl, projBody, projPath = 'root', projView = ls.get('proj.view', 'icon'), projQ = '', projSort = ls.get('proj.sort', 'name'), projFilter = 'all', projSel = new Set(), projLast = null, projSearchEl;
+const LABELS = ['#7c8cf8', '#2ec27e', '#e5a50a', '#e66100', '#c64600', '#c061cb', '#26a269', '#ff7b63'];
+export const usedIds = () => { const u = new Set(); for (const s of P.seqs) for (const t of [...s.v, ...s.a]) for (const c of t.clips) u.add(c.item); return u; };
 function projBuild(el) {
-  projEl = el; el.classList.add('proj');
+  projEl = el; el.classList.add('proj'); el.tabIndex = 0;
   const bar = h('div', { class: 'ptool' });
-  const search = h('input', { class: 'psearch', placeholder: 'Search', oninput: e => { projQ = e.target.value.toLowerCase(); projDraw(); } });
-  bar.append(search, h('div', { class: 'grow' }),
-    h('button', { class: 'tb', title: 'List View', onclick: () => { projView = 'list'; projDraw(); } }, icon('list')),
-    h('button', { class: 'tb', title: 'Icon View', onclick: () => { projView = 'icon'; projDraw(); } }, icon('grid')),
+  projSearchEl = h('input', { class: 'psearch', placeholder: 'Search project (Ctrl+F)', oninput: e => { projQ = e.target.value.toLowerCase(); projDraw(); } });
+  const sortBtn = h('button', { class: 'tb', title: 'Sort and Filter', onclick: e => popMenu(e.clientX, e.clientY, [
+    ...['name', 'duration', 'type', 'date added'].map(k => ['Sort by ' + k, () => { projSort = k; ls.set('proj.sort', k); projDraw(); }, '', projSort === k]), '-',
+    ...[['all', 'Show all'], ['video', 'Video only'], ['audio', 'Audio only'], ['image', 'Images only'], ['unused', 'Unused media'], ['fav', 'Favorites']].map(([k, l]) => [l, () => { projFilter = k; projDraw(); }, '', projFilter === k])]) }, icon('sort'));
+  bar.append(projSearchEl, h('div', { class: 'grow' }), sortBtn,
+    h('button', { class: 'tb', title: 'List View', onclick: () => { projView = 'list'; ls.set('proj.view', 'list'); projDraw(); } }, icon('list')),
+    h('button', { class: 'tb', title: 'Icon View', onclick: () => { projView = 'icon'; ls.set('proj.view', 'icon'); projDraw(); } }, icon('grid')),
     h('button', { class: 'tb', title: 'New Bin', onclick: newBin }, icon('folder')),
     h('button', { class: 'tb', title: 'New Item', onclick: e => newItemMenu(e) }, icon('newitem')),
     h('button', { class: 'tb', title: 'Import (Ctrl+I)', onclick: pickFiles }, icon('import')));
@@ -21,9 +28,30 @@ function projBuild(el) {
   el.append(bar, projBody);
   el.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
   el.addEventListener('drop', e => { if (e.dataTransfer.files.length) { e.preventDefault(); importFiles([...e.dataTransfer.files], projPath); } });
+  el.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); e.stopPropagation(); projSearchEl.focus(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && projSel.size) { e.stopPropagation(); delItems([...projSel]); }
+    else if (e.key === 'F2' && projSel.size === 1) renameItem([...projSel][0]);
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); e.stopPropagation(); P.items.filter(i => !i.gfxItem && i.bin === projPath).forEach(i => projSel.add(i.id)); projDraw(); }
+  });
+  // marquee selection
+  projBody.addEventListener('pointerdown', e => {
+    if (e.target.closest('.pitem') || e.button) return; el.focus();
+    const r0 = projBody.getBoundingClientRect(); const sx = e.clientX, sy = e.clientY; const box = h('div', { class: 'marq' }); document.body.append(box); const base = e.shiftKey ? new Set(projSel) : new Set();
+    projSel = new Set(base);
+    const mv = ev => { const x1 = Math.min(sx, ev.clientX), x2 = Math.max(sx, ev.clientX), y1 = Math.min(sy, ev.clientY), y2 = Math.max(sy, ev.clientY); Object.assign(box.style, { left: x1 + 'px', top: y1 + 'px', width: x2 - x1 + 'px', height: y2 - y1 + 'px' });
+      projSel = new Set(base); projBody.querySelectorAll('.pitem[data-id]').forEach(d => { const r = d.getBoundingClientRect(); const hit = r.right > x1 && r.left < x2 && r.bottom > y1 && r.top < y2; d.classList.toggle('on', hit || base.has(d.dataset.id)); if (hit) projSel.add(d.dataset.id); }); };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); box.remove(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
   bus.on('project', projDraw); bus.on('seq', projDraw);
   projDraw();
 }
+export function focusProjectSearch() { openPanelLater('project'); setTimeout(() => projSearchEl && projSearchEl.focus(), 50); }
+const openPanelLater = id => import('./dock.js').then(m => m.openPanel(id));
+function delItems(ids) { if (!ids.length) return; hist.push('Delete media'); P.items = P.items.filter(i => !ids.includes(i.id)); for (const s of P.seqs) for (const t of [...s.v, ...s.a]) t.clips = t.clips.filter(c => !ids.includes(c.item)); projSel.clear(); bus.emit('project'); bus.emit('seq'); }
+function renameItem(id) { const it = P.items.find(i => i.id === id); if (!it) return; const n = prompt('Rename', it.name); if (n) { it.name = n; bus.emit('project'); } }
 export function newBin() { const n = prompt('Bin name', 'Bin'); if (!n) return; P.bins.push({ id: uid('b'), name: n, parent: projPath }); projDraw(); }
 export function newItemMenu(e) {
   popMenu(e.clientX, e.clientY, [
@@ -33,29 +61,58 @@ export function newItemMenu(e) {
 }
 export function newSequence(name) {
   const n = name || 'Sequence ' + String(P.seqs.length + 1).padStart(2, '0');
-  const s = newSeq(n); P.seqs.push(s); P.seq = s; P.t = 0; bus.emit('seq'); bus.emit('time'); return s;
+  const s = newSeq(n); P.seqs.push(s); setSeq(s); return s;
 }
 function projDraw() {
   if (!projBody) return;
   projBody.innerHTML = '';
   const crumbs = []; let cur = projPath;
   while (cur) { const b = P.bins.find(x => x.id === cur); crumbs.unshift(b); cur = b && b.parent; }
-  projBody.append(h('div', { class: 'crumbs' }, crumbs.map((b, i) => h('span', { onclick: () => { projPath = b.id; projDraw(); } }, b.name + (i < crumbs.length - 1 ? ' ›' : '')))));
+  const searching = !!projQ;
+  projBody.append(h('div', { class: 'crumbs' }, searching ? h('span', {}, 'Search results for "' + projQ + '"') : crumbs.map((b, i) => h('span', { onclick: () => { projPath = b.id; projDraw(); } }, b.name + (i < crumbs.length - 1 ? ' ›' : '')))));
   const wrap = h('div', { class: projView === 'icon' ? 'igrid' : 'ilist' });
-  const bins = P.bins.filter(b => b.parent === projPath && (!projQ || b.name.toLowerCase().includes(projQ)));
-  bins.forEach(b => wrap.append(h('div', { class: 'pitem bin', ondblclick: () => { projPath = b.id; projDraw(); } }, h('div', { class: 'pth' }, icon('folder', 40)), h('div', { class: 'pnm' }, b.name))));
-  if (projPath === 'root') P.seqs.filter(s => !projQ || s.name.toLowerCase().includes(projQ)).forEach(s => wrap.append(h('div', { class: 'pitem seqi' + (s === P.seq ? ' on' : ''), ondblclick: () => { P.seq = s; P.sel = []; bus.emit('seq'); } }, h('div', { class: 'pth' }, icon('seq', 40)), h('div', { class: 'pnm' }, s.name), h('div', { class: 'pdr' }, tc(seqDur(s), s.fps)))));
-  P.items.filter(i => i.bin === projPath && (!projQ || i.name.toLowerCase().includes(projQ))).forEach(it => {
-    const d = h('div', { class: 'pitem' + (P.source === it ? ' on' : ''), draggable: 'true', title: it.name });
+  const q = s => s.toLowerCase().includes(projQ);
+  const bins = P.bins.filter(b => (searching ? q(b.name) : b.parent === projPath));
+  bins.forEach(b => wrap.append(h('div', { class: 'pitem bin', ondblclick: () => { projPath = b.id; projQ = ''; if (projSearchEl) projSearchEl.value = ''; projDraw(); } }, h('div', { class: 'pth' }, icon('folder', 40)), h('div', { class: 'pnm' }, b.name))));
+  if (searching || projPath === 'root') P.seqs.filter(s => !searching || q(s.name)).forEach(s => wrap.append(h('div', { class: 'pitem seqi' + (s === P.seq ? ' on' : ''), ondblclick: () => setSeq(s) }, h('div', { class: 'pth' }, icon('seq', 40)), h('div', { class: 'pnm' }, s.name), h('div', { class: 'pdr' }, tc(seqDur(s), s.fps)))));
+  const used = usedIds();
+  let list = P.items.filter(i => !i.gfxItem && (searching ? q(i.name) : i.bin === projPath));
+  if (projFilter === 'unused') list = list.filter(i => !used.has(i.id)); else if (projFilter === 'fav') list = list.filter(i => i.fav); else if (projFilter !== 'all') list = list.filter(i => i.kind === projFilter);
+  const cmp = { name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }), duration: (a, b) => (b.dur || 0) - (a.dur || 0), type: (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name), 'date added': (a, b) => P.items.indexOf(b) - P.items.indexOf(a) }[projSort];
+  list.sort(cmp);
+  list.forEach(it => {
+    const d = h('div', { class: 'pitem' + (projSel.has(it.id) || P.source === it ? ' on' : ''), draggable: 'true', title: it.name, 'data-id': it.id });
     d.addEventListener('dragstart', e => { e.dataTransfer.setData('text/op-item', it.id); e.dataTransfer.effectAllowed = 'copy'; });
     d.addEventListener('dblclick', () => openSource(it));
-    d.addEventListener('click', () => { P.source = P.source; projBody.querySelectorAll('.pitem').forEach(x => x.classList.remove('on')); d.classList.add('on'); });
-    d.append(h('div', { class: 'pth' }, it.thumb ? h('img', { src: it.thumb, draggable: false }) : icon(it.kind === 'audio' ? 'audio' : 'film', 36)),
-      h('div', { class: 'pnm' }, it.name), h('div', { class: 'pdr' }, it.kind === 'image' ? '' : tc(it.dur, it.fps)));
+    d.addEventListener('click', e => {
+      projEl.focus();
+      if (e.ctrlKey || e.metaKey) { projSel.has(it.id) ? projSel.delete(it.id) : projSel.add(it.id); }
+      else if (e.shiftKey && projLast) { const ids = list.map(x => x.id); const a = ids.indexOf(projLast), b = ids.indexOf(it.id); if (a >= 0 && b >= 0) { projSel = new Set(ids.slice(Math.min(a, b), Math.max(a, b) + 1)); } }
+      else projSel = new Set([it.id]);
+      projLast = it.id; projBody.querySelectorAll('.pitem[data-id]').forEach(x => x.classList.toggle('on', projSel.has(x.dataset.id)));
+    });
+    d.addEventListener('contextmenu', e => { e.preventDefault(); if (!projSel.has(it.id)) { projSel = new Set([it.id]); projDraw(); } popMenu(e.clientX, e.clientY, [
+      ['Open in Source Monitor', () => openSource(it)], ['Insert at Playhead', () => { openSource(it); E.placeItem(it, { mode: 'insert' }); }], ['Overwrite at Playhead', () => E.placeItem(it, { mode: 'overwrite' })], '-',
+      [it.fav ? 'Remove Favorite' : 'Add to Favorites', () => { it.fav = !it.fav; projDraw(); }],
+      ...LABELS.slice(0, 4).map((c, i) => ['Label ' + ['Violet', 'Green', 'Yellow', 'Orange'][i], () => { [...projSel].forEach(id => { const x = P.items.find(y => y.id === id); if (x) x.label = c; }); projDraw(); }]), ['Clear Label', () => { [...projSel].forEach(id => { const x = P.items.find(y => y.id === id); if (x) x.label = null; }); projDraw(); }], '-',
+      ['Rename...', () => renameItem(it.id), 'F2'], ['Delete', () => delItems([...projSel]), 'Del']]); });
+    const thumb = h('div', { class: 'pth' }, it.thumb ? h('img', { src: it.thumb, draggable: false }) : icon(it.kind === 'audio' ? 'audio' : 'film', 36));
+    if (it.kind === 'video' && it.thumb && projView === 'icon') hoverScrub(thumb, it);
+    d.append(thumb, h('div', { class: 'pnm' }, h('i', { class: 'plab', style: { background: it.label || 'transparent' } }), it.fav ? h('span', { class: 'pfav' }, icon('star', 10)) : null, h('span', {}, it.name)), h('div', { class: 'pdr' }, it.kind === 'image' ? '' : tc(it.dur, it.fps)));
+    if (!used.has(it.id) && projFilter === 'all') d.classList.add('unused');
     wrap.append(d);
   });
-  if (!wrap.children.length) wrap.append(h('div', { class: 'pempty' }, 'Import media to begin'));
+  if (!wrap.children.length) wrap.append(h('div', { class: 'pempty' }, searching ? 'No matches' : 'Import media to begin'));
   projBody.append(wrap);
+  projBody.append(h('div', { class: 'pfoot' }, list.length + ' item' + (list.length === 1 ? '' : 's') + (projSel.size ? ', ' + projSel.size + ' selected' : '')));
+}
+// hover to scrub: seek a hidden video on mouse move and paint its frame over the thumbnail
+function hoverScrub(box, it) {
+  let v = null, cv = null;
+  box.addEventListener('pointerenter', () => { if (v) return; v = document.createElement('video'); v.src = it.url; v.muted = true; v.preload = 'auto'; cv = h('canvas', { class: 'hscrub' }); cv.width = 160; cv.height = 90; box.append(cv); cv.style.display = 'none';
+    v.addEventListener('seeked', () => { try { cv.getContext('2d').drawImage(v, 0, 0, 160, 90); cv.style.display = 'block'; } catch (e) { } }); });
+  box.addEventListener('pointermove', e => { if (!v || !v.duration) return; const r = box.getBoundingClientRect(); v.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * v.duration * .999; });
+  box.addEventListener('pointerleave', () => { if (cv) cv.style.display = 'none'; if (v) { v.removeAttribute('src'); v.load(); v = null; } if (cv) { cv.remove(); cv = null; } });
 }
 
 // ---------------- Source monitor ----------------
@@ -139,7 +196,7 @@ function pgBuild(el) {
   };
   bus.on('time', upd); bus.on('seq', () => { layoutMon(); upd(); pb.invalidate(); }); bus.on('resize', layoutMon); bus.on('select', drawOv); bus.on('param', () => { pb.invalidate(); drawOv(); });
   new ResizeObserver(layoutMon).observe(pgWrap);
-  ov.addEventListener('pointerdown', ovDown);
+  ov.addEventListener('pointerdown', e => { if (!toolDown(e, ov)) ovDown(e); });
   layoutMon(); upd();
 }
 let zoomMode = 'fit';
@@ -170,9 +227,10 @@ function clipBox(c) {
 function drawOv() {
   if (!ov || !P.seq) return;
   const g = ov.getContext('2d'); g.clearRect(0, 0, ov.width, ov.height);
-  const c = FOCUS(); if (!c || P.playing) return;
-  const b = clipBox(c); if (!b) return;
   const k = ov.width / P.seq.w;
+  const custom = drawToolOv(g, k);
+  const c = FOCUS(); if (!c || P.playing || custom || c.gfx) return;
+  const b = clipBox(c); if (!b) return;
   g.strokeStyle = '#2d8ceb'; g.lineWidth = 1.5; g.beginPath(); b.pts.forEach(([x, y], i) => i ? g.lineTo(x * k, y * k) : g.moveTo(x * k, y * k)); g.closePath(); g.stroke();
   g.fillStyle = '#fff'; g.strokeStyle = '#2d8ceb';
   b.pts.forEach(([x, y]) => { g.fillRect(x * k - 4, y * k - 4, 8, 8); g.strokeRect(x * k - 4, y * k - 4, 8, 8); });
@@ -202,14 +260,40 @@ function ovDown(e) {
 }
 
 // ---------------- Tools ----------------
-const TOOLS = [['v', 'Selection Tool (V)', 'tsel'], ['a', 'Track Select Forward Tool (A)', 'tfwd'], ['b', 'Ripple Edit Tool (B)', 'tripple'], ['r', 'Rate Stretch Tool (R)', 'trate'], ['c', 'Razor Tool (C)', 'trazor'], ['y', 'Slip Tool (Y)', 'tslip'], ['p', 'Pen Tool (P)', 'tpen'], ['h', 'Hand Tool (H)', 'thand'], ['z', 'Zoom Tool (Z)', 'tzoom'], ['t', 'Type Tool (T)', 'ttype']];
+// groups: first entry is default; hold a group button to pick another tool of that group
+export const TOOL_ALL = {
+  v: ['Selection Tool (V)', 'tsel'], a: ['Track Select Forward Tool (A)', 'tfwd'], sa: ['Track Select Backward Tool (Shift+A)', 'tback'],
+  b: ['Ripple Edit Tool (B)', 'tripple'], n: ['Rolling Edit Tool (N)', 'troll'], r: ['Rate Stretch Tool (R)', 'trate'],
+  c: ['Razor Tool (C)', 'trazor'], y: ['Slip Tool (Y)', 'tslip'], u: ['Slide Tool (U)', 'tslide'], p: ['Pen Tool (P)', 'tpen'],
+  rect: ['Rectangle Tool', 'trect'], ellipse: ['Ellipse Tool', 'tellipse'], poly: ['Polygon Tool', 'tpoly'],
+  om_obj: ['Object Mask Tool', 'tobj'], om_ellipse: ['Ellipse Mask Tool', 'tmell'], om_rect: ['Rectangle Mask Tool', 'tmrect'], om_pen: ['Pen Mask Tool', 'tmpen'],
+  h: ['Hand Tool (H)', 'thand'], z: ['Zoom Tool (Z)', 'tzoom'], t: ['Type Tool (T)', 'ttype'],
+};
+const TOOL_GROUPS = [['v'], ['a', 'sa'], ['b', 'n', 'r'], ['c'], ['y', 'u'], ['p'], ['rect', 'ellipse', 'poly'], ['om_obj', 'om_ellipse', 'om_rect', 'om_pen'], ['h', 'z'], ['t']];
+const grpCur = g => { const k = ls.get('tg.' + g[0], g[0]); return g.includes(k) ? k : g[0]; };
 export function setTool(k) {
-  if (!TOOLS.find(t => t[0] === k)) return;
+  if (!TOOL_ALL[k]) return;
+  const g = TOOL_GROUPS.find(x => x.includes(k)); if (g && g.length > 1) ls.set('tg.' + g[0], k);
+  endTextEdit();
   P.tool = k; document.body.dataset.tool = k; bus.emit('tool');
 }
+function endTextEdit() { try { GT.pen = null; GT.maskPen = null; endEdit(); } catch {} }
 function toolsBuild(el) {
   el.classList.add('tools');
-  const draw = () => { el.innerHTML = ''; TOOLS.forEach(([k, t, ic]) => el.append(h('button', { class: 'tool' + (P.tool === k ? ' on' : ''), title: t, onclick: () => setTool(k) }, icon(ic)))); };
+  const draw = () => {
+    el.innerHTML = '';
+    TOOL_GROUPS.forEach(g => {
+      const cur = g.includes(P.tool) ? P.tool : grpCur(g), [title, ic] = TOOL_ALL[cur];
+      const b = h('button', { class: 'tool' + (g.includes(P.tool) ? ' on' : '') + (g.length > 1 ? ' grp' : ''), title: title + (g.length > 1 ? ' - hold for more' : '') }, icon(ic));
+      let timer = 0, held = false;
+      const menu = () => { held = true; const r = b.getBoundingClientRect(); popMenu(r.right + 2, r.top, g.map(k => [TOOL_ALL[k][0], () => setTool(k), '', k === cur])); };
+      b.addEventListener('pointerdown', e => { held = false; if (g.length > 1) timer = setTimeout(menu, 340); });
+      b.addEventListener('pointerup', () => { clearTimeout(timer); if (!held) setTool(cur); });
+      b.addEventListener('pointerleave', () => clearTimeout(timer));
+      b.addEventListener('contextmenu', e => { e.preventDefault(); if (g.length > 1) menu(); });
+      el.append(b);
+    });
+  };
   bus.on('tool', draw); draw();
 }
 

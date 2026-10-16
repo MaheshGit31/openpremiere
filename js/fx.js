@@ -43,9 +43,14 @@ export const easeFn = e => {
 
 // ---------- effect registry ----------
 // p: [key,label,min,max,default,step,unit]
-const P_ = (k, l, mn, mx, d, st = 1, u = '') => ({ k, l, min: mn, max: mx, def: d, step: st, u });
+const P_ = (k, l, mn, mx, d, st = 1, u = '') => ({ k, l, min: mn, max: mx, def: d, step: st, u, t: 'num' });
+export const N = P_;
+export const COL = (k, l, d = '#ffffff') => ({ k, l, def: d, t: 'color' });
+export const BOOL = (k, l, d = false) => ({ k, l, def: d ? 1 : 0, t: 'bool', min: 0, max: 1, step: 1 });
+export const SEL = (k, l, opts, d = 0) => ({ k, l, def: d, t: 'sel', opts, min: 0, max: opts.length - 1, step: 1 });
+export const TXT = (k, l, d = '') => ({ k, l, def: d, t: 'txt' });
 export const FX = {};
-const def = (type, name, cat, params, o = {}) => { FX[type] = { type, name, cat, params, ...o }; };
+export const def = (type, name, cat, params, o = {}) => { FX[type] = { type, name, cat, params, ...o }; };
 
 def('motion', 'Motion', 'Built-in', [
   P_('px', 'Position X', -8000, 8000, null, 1, 'px'), P_('py', 'Position Y', -8000, 8000, null, 1, 'px'),
@@ -54,7 +59,8 @@ def('motion', 'Motion', 'Built-in', [
   P_('ax', 'Anchor X', -8000, 8000, null, 1, 'px'), P_('ay', 'Anchor Y', -8000, 8000, null, 1, 'px'),
   P_('flick', 'Anti-flicker', 0, 1, 0, .01),
 ], { builtin: true, hidden: true });
-def('opacity', 'Opacity', 'Built-in', [P_('op', 'Opacity', 0, 100, 100, 1, '%')], { builtin: true, hidden: true });
+export const BLENDS = ['Normal', 'Darken', 'Multiply', 'Color Burn', 'Lighten', 'Screen', 'Color Dodge', 'Add', 'Overlay', 'Soft Light', 'Hard Light', 'Difference', 'Exclusion', 'Hue', 'Saturation', 'Color', 'Luminosity'];
+def('opacity', 'Opacity', 'Built-in', [P_('op', 'Opacity', 0, 100, 100, 1, '%'), SEL('blend', 'Blend Mode', BLENDS, 0)], { builtin: true, hidden: true });
 def('avol', 'Volume', 'Built-in', [P_('db', 'Level', -60, 15, 0, .1, 'dB')], { builtin: true, hidden: true });
 def('time', 'Time Remapping', 'Built-in', [P_('speed', 'Speed', 0, 1000, 100, 1, '%')], { builtin: true, hidden: true });
 
@@ -71,31 +77,7 @@ def('lumetri', 'Lumetri Color', 'Color Correction', [
   P_('gainR', 'Highlights Red', -1, 1, 0, .01), P_('gainG', 'Highlights Green', -1, 1, 0, .01), P_('gainB', 'Highlights Blue', -1, 1, 0, .01),
   P_('vigAmt', 'Vignette Amount', -5, 5, 0, .01), P_('vigSize', 'Vignette Midpoint', 0, 100, 50), P_('vigFeather', 'Vignette Feather', 0, 100, 50),
 ], { builtin: true });
-def('bc', 'Brightness & Contrast', 'Color Correction', [P_('bright', 'Brightness', -100, 100, 0), P_('contrast', 'Contrast', -100, 100, 0)]);
-def('gamma', 'Gamma Correction', 'Color Correction', [P_('gamma', 'Gamma', 1, 28, 10, .1)]);
-def('huesat', 'Hue / Saturation', 'Color Correction', [P_('hue', 'Hue', -180, 180, 0), P_('sat', 'Saturation', 0, 200, 100)]);
-def('bw', 'Black & White', 'Image Control', []);
-def('invert', 'Invert', 'Channel', []);
-def('sepia', 'Color Pass / Sepia', 'Image Control', [P_('amt', 'Amount', 0, 100, 100)]);
-def('colorbal', 'Color Balance', 'Color Correction', [
-  P_('liftR', 'Shadow Red', -100, 100, 0), P_('liftG', 'Shadow Green', -100, 100, 0), P_('liftB', 'Shadow Blue', -100, 100, 0),
-  P_('gamR', 'Midtone Red', -100, 100, 0), P_('gamG', 'Midtone Green', -100, 100, 0), P_('gamB', 'Midtone Blue', -100, 100, 0),
-  P_('gainR', 'Highlight Red', -100, 100, 0), P_('gainG', 'Highlight Green', -100, 100, 0), P_('gainB', 'Highlight Blue', -100, 100, 0)]);
-def('posterize', 'Posterize', 'Stylize', [P_('lv', 'Level', 2, 32, 6)]);
-def('threshold', 'Threshold', 'Image Control', [P_('lv', 'Level', 0, 255, 128)]);
-def('blur', 'Gaussian Blur', 'Blur & Sharpen', [P_('r', 'Blurriness', 0, 100, 0, .1)]);
-def('sharpen', 'Sharpen', 'Blur & Sharpen', [P_('amt', 'Amount', 0, 100, 0)]);
-def('mosaic', 'Mosaic', 'Stylize', [P_('n', 'Blocks', 1, 400, 60)]);
-def('rgbsplit', 'RGB Split', 'Stylize', [P_('amt', 'Amount', 0, 100, 10, .1), P_('ang', 'Angle', 0, 360, 0)]);
-def('noise', 'Noise', 'Noise & Grain', [P_('amt', 'Amount', 0, 100, 20)]);
-def('vignette', 'Vignette', 'Stylize', [P_('amt', 'Amount', -5, 5, -1, .01), P_('size', 'Midpoint', 0, 100, 50), P_('feather', 'Feather', 0, 100, 50)]);
-def('crop', 'Crop', 'Transform', [P_('l', 'Left', 0, 100, 0, .1, '%'), P_('t', 'Top', 0, 100, 0, .1, '%'), P_('r', 'Right', 0, 100, 0, .1, '%'), P_('b', 'Bottom', 0, 100, 0, .1, '%')]);
-def('hflip', 'Horizontal Flip', 'Transform', []);
-def('vflip', 'Vertical Flip', 'Transform', []);
-def('mirror', 'Mirror', 'Distort', [P_('pos', 'Center', 0, 100, 50, .1, '%')]);
-def('fadein', 'Fade', 'Video', [P_('amt', 'Amount', 0, 100, 0)]);
-
-export const CATS = ['Color Correction', 'Image Control', 'Blur & Sharpen', 'Stylize', 'Transform', 'Distort', 'Noise & Grain', 'Channel', 'Video'];
+export const CATS = ['Blur & Sharpen', 'Channel', 'Color Correction', 'Distort', 'Generate', 'Image Control', 'Immersive Video', 'Keying', 'Noise & Grain', 'Perspective', 'Stylize', 'Time', 'Transform', 'Utility', 'Video'];
 
 export function newFx(type) {
   const d = FX[type]; const p = {};

@@ -1,7 +1,7 @@
 const NS = 'http://www.w3.org/2000/svg';
 // 24x24 viewBox, stroke icons unless fill flagged by leading '!'
 const I = {
-  list: 'M4 6h16M4 12h16M4 18h16', grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  list: 'M4 6h16M4 12h16M4 18h16', sort: 'M4 6h10M4 12h7M4 18h4M17 5v14M14 16l3 3 3-3', tback: 'M20 5v14M16 8l-8 4 8 4zM7 8l-4 4 4 4', troll: 'M12 4v16M8 8l-5 4 5 4zM16 8l5 4-5 4', tslide: 'M3 7h5v10H3zM16 7h5v10h-5zM9 9h6v6H9zM9 12H5M15 12h4', trect: 'M4 6h16v12H4z', tellipse: 'M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z', tpoly: 'M12 3l8.5 6.2-3.2 10H6.7l-3.2-10z', tobj: 'M5 4l4 12 2.4-4.6L16 9zM13 13l6 6M4 4h3M4 4v3M20 4h-3M20 4v3', tmell: 'M12 6c4.4 0 8 2.7 8 6s-3.6 6-8 6-8-2.7-8-6 3.6-6 8-6zM2 2h3M2 2v3M22 2h-3M22 2v3', tmrect: 'M5 7h14v10H5zM2 2h3M2 2v3M22 2h-3M22 2v3', tmpen: 'M5 17l3-8 5 4 5-6 1 11zM2 2h3M2 2v3M22 2h-3M22 2v3', star: 'M12 3l2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 17l-5.4 2.8 1.1-6.1L3.2 9.4l6.1-.8z', trans: 'M3 6h8v12H3zM13 6h8v12h-8zM11 12h2', wave: 'M3 12h2M7 7v10M11 4v16M15 8v8M19 10v4', grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   folder: 'M3 6h6l2 2h10v11H3z', newitem: 'M6 3h9l4 4v14H6zM14 3v5h5M12 11v6M9 14h6', import: 'M12 3v12M7 10l5 5 5-5M4 20h16',
   seq: 'M3 6h18v12H3zM3 10h18M8 6v12', film: 'M4 5h16v14H4zM4 9h3M4 13h3M4 17h3M17 9h3M17 13h3M17 17h3M9 8h6v8H9z', audio: 'M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11',
   markin: 'M9 4v16M9 4h8M9 12h6M9 20h8', markout: 'M15 4v16M15 4H7M15 12H9M15 20H7',
@@ -14,6 +14,7 @@ const I = {
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 .01 0', chev: 'M9 6l6 6-6 6', chevd: 'M6 9l6 6 6-6', diamond: 'M12 4l7 8-7 8-7-8z',
   reset: 'M4 12a8 8 0 1 0 3-6M4 4v5h5', fx: 'M5 5h6M5 5v14M5 12h5M13 8l7 8M20 8l-7 8', search: 'M10 4a6 6 0 1 0 .01 0M15 15l6 6',
   link:'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1', lock:'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3', unlock:'M6 11h12v9H6zM8 11V8a4 4 0 0 1 7.5-2', stopwatch:'M12 21a7 7 0 1 0 .01 0M12 10v4l2.5 1.5M10 3h4M12 3v3', magnet:'M5 4v8a7 7 0 0 0 14 0V4h-4v8a3 3 0 0 1-6 0V4zM5 8h4M15 8h4', marker:'M6 4h12v10l-6 6-6-6z', kprev:'M15 6l-6 6 6 6', knext:'M9 6l6 6-6 6', kdiam:'M12 5l7 7-7 7-7-7z', menu:'M4 7h16M4 12h16M4 17h16', more:'M7 7l5 5-5 5M13 7l5 5-5 5', check:'M5 12l5 5 9-10',
+  home:'M4 11l8-7 8 7M6 10v10h4v-6h4v6h4V10', learn:'M3 8l9-4 9 4-9 4zM7 10v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5', gear:'M12 9a3 3 0 1 0 .01 0M4 12l2-1 .5-2-1-2 2-2 2 1 2-.5 1-2h3l1 2 2 .5 2-1 2 2-1 2 .5 2 2 1v3l-2 1-.5 2 1 2-2 2-2-1-2 .5-1 2h-3l-1-2-2-.5-2 1-2-2 1-2-.5-2-2-1z', more2:'M5 12h.01M12 12h.01M19 12h.01',
   trash: 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13', plus: 'M12 5v14M5 12h14', x: 'M6 6l12 12M18 6L6 18',
 };
 export function icon(name, size = 16) {

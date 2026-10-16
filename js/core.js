@@ -44,6 +44,7 @@ export const dur = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60),
 
 // Project state
 export const P = OP.P = {
+  projId: null, projName: 'Untitled', openSeqs: [],
   items: [],       // media
   bins: [{ id: 'root', name: 'Project', parent: null }],
   seqs: [],
@@ -55,9 +56,8 @@ export const P = OP.P = {
   zoom: 80,        // px per second
   snap: true,
   inP: null, outP: null,
-  markers: [],
   history: [],
-  focusClip: null,
+  focusClip: null, selTr: null, selLayer: null, maskSel: null,
   source: null,    // item loaded in source monitor
   srcIn: null, srcOut: null,
 };
@@ -108,3 +108,26 @@ export const hist = {
     this.restore(top.s, top.seq); P.history = stack.u.map(x => x.label); bus.emit('history');
   },
 };
+
+// ---------- project lifecycle ----------
+export const uidp = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+export function resetProject() {
+  for (const it of P.items) { try { if (it.url && it.url.startsWith('blob:')) URL.revokeObjectURL(it.url); } catch {} }
+  Object.assign(P, { items: [], bins: [{ id: 'root', name: 'Project', parent: null }], seqs: [], seq: null, sel: [], t: 0, playing: false, inP: null, outP: null, history: [], focusClip: null, selTr: null, selLayer: null, maskSel: null, source: null, srcIn: null, srcOut: null, projId: null, projName: 'Untitled', openSeqs: [] });
+  stack.u = []; stack.r = [];
+  bus.emit('project'); bus.emit('seq'); bus.emit('history'); bus.emit('time');
+}
+export function serialize() {
+  return {
+    items: P.items.map(i => ({ ...i, file: undefined, url: (i.solid || i.title) ? i.url : null })),
+    bins: P.bins, seqs: P.seqs, seqId: P.seq && P.seq.id, openSeqs: P.openSeqs || [],
+  };
+}
+
+Object.defineProperty(P, 'markers', { get() { return P.seq ? (P.seq.markers ||= []) : []; }, set(v) { if (P.seq) P.seq.markers = v; }, enumerable: true });
+export function setSeq(s) {
+  if (P.seq) P.seq.t = P.t;
+  P.seq = s; P.t = (s && s.t) || 0; P.sel = [];
+  if (s && !P.openSeqs.includes(s.id)) P.openSeqs.push(s.id);
+  bus.emit('seq'); bus.emit('time');
+}

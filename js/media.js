@@ -1,4 +1,5 @@
 import { P, uid, bus, newSeq, hist } from './core.js';
+import { storeBlob } from './project.js';
 
 const probe = (file, url) => new Promise(res => {
   const kind = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : file.type.startsWith('image') ? 'image' : null;
@@ -31,7 +32,7 @@ export async function importFiles(files, bin = 'root') {
   const out = [];
   for (const f of files) {
     const it = await probe(f, URL.createObjectURL(f));
-    if (it) { it.bin = bin; P.items.push(it); out.push(it); }
+    if (it) { it.bin = bin; it.added = Date.now(); P.items.push(it); out.push(it); storeBlob(it); }
   }
   bus.emit('project');
   return out;

@@ -4,7 +4,11 @@ import { FX, CATS, newFx, val, setKey, delKey, kfKey, kfval, EASE_NAMES } from '
 import { pb } from './playback.js';
 import { icon } from './icons.js';
 import { item } from './media.js';
+import { TRANS, TCATS } from './trans.js';
+import { AFX, ACATS, ATRANS } from './afx.js';
+import { defaultMask } from './gfxtools.js';
 import * as E from './edit.js';
+import { tl, markerDialog } from './timeline.js';
 
 const focusClip = () => {
   if (!P.seq) return null;
@@ -67,12 +71,17 @@ function ecDraw(keepScroll) {
   if (!ecBody) return;
   if (ecBody.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   const sc = ecBody.scrollTop; ecBody.innerHTML = '';
+  if (P.selTr) {
+    const f = findClip(P.selTr.id), x = f && f.c[P.selTr.side], d = x && (TRANS[x.type] || ATRANS[x.type]);
+    if (!x || !d) P.selTr = null;
+    else { trPanel(f.c, f.tr, P.selTr.side, x, d); ecBody.scrollTop = sc; return; }
+  }
   const c = focusClip();
   if (!c) { ecBody.append(h('div', { class: 'pempty' }, 'Select a clip')); return; }
   const it = item(c.item);
   ecBody.append(h('div', { class: 'echead' }, h('span', {}, (c.type === 'v' ? 'Video' : 'Audio') + ' – ' + c.name), h('i', {}, tc(c.start, P.seq.fps) + ' to ' + tc(c.start + c.dur, P.seq.fps))));
   for (const fx of c.fx) {
-    const d = FX[fx.type]; if (!d) continue;
+    const d = FX[fx.type] || AFX[fx.type]; if (!d) continue;
     const rer = () => ecDraw(true);
     const open = EC.open[fx.id + c.id] !== false;
     const hd = h('div', { class: 'fxh' },
@@ -84,13 +93,61 @@ function ecDraw(keepScroll) {
       !d.builtin ? h('button', { class: 'tb sm', title: 'Remove effect', onclick: () => { hist.push('Remove effect'); c.fx = c.fx.filter(x => x !== fx); pb.invalidate(); bus.emit('seq'); } }, icon('x', 13)) : null);
     ecBody.append(hd);
     if (!open) continue;
-    const vis = (c.type === 'a' && fx.type !== 'avol') ? [] : d.params.filter(q => !(fx.type === 'motion' && q.k === 'flick') && !(fx.type === 'motion' && q.k === 'sw'));
+    const vis = (c.type === 'a' && fx.type !== 'avol' && !AFX[fx.type]) ? [] : d.params.filter(q => !(fx.type === 'motion' && q.k === 'flick') && !(fx.type === 'motion' && q.k === 'sw'));
     for (const q of vis) ecBody.append(paramRow(c, fx, q, rer));
   }
+  if (c.type === 'v') maskSection(c);
   ecBody.scrollTop = sc;
 }
 
+function maskSection(c) {
+  const open = EC.open['masks' + c.id] !== false;
+  ecBody.append(h('div', { class: 'fxh' }, h('span', { class: 'twist' + (open ? ' o' : ''), onclick: () => { EC.open['masks' + c.id] = !open; ecDraw(true); } }, icon('chev', 11)), h('span', { class: 'fxn' }, 'Masks'), h('div', { class: 'grow' }),
+    h('button', { class: 'tb sm', title: 'Add ellipse mask', onclick: () => { hist.push('Mask'); defaultMask(c, 'ellipse'); } }, icon('tmell', 14)),
+    h('button', { class: 'tb sm', title: 'Add 4-point polygon mask', onclick: () => { hist.push('Mask'); defaultMask(c, 'rect'); } }, icon('tmrect', 14)),
+    h('button', { class: 'tb sm', title: 'Draw free-form mask', onclick: () => { hist.push('Mask'); defaultMask(c, 'path'); } }, icon('tmpen', 14))));
+  if (!open) return;
+  (c.masks || []).forEach((m, i) => {
+    const on = P.maskSel && P.maskSel.id === m.id;
+    ecBody.append(h('div', { class: 'pwrap' }, h('div', { class: 'prow simple eg mrw' + (on ? ' on' : ''), onclick: () => { P.maskSel = { clip: c.id, id: m.id }; bus.emit('param'); ecDraw(true); } }, h('span', { class: 'stopw dis' }), h('span', { class: 'pl' }, (m.name || (m.type === 'rect' ? 'Polygon' : m.type[0].toUpperCase() + m.type.slice(1))) + ' Mask ' + (i + 1)), h('span', { class: 'egc' },
+      h('label', { class: 'mchk', title: 'Invert' }, h('input', { type: 'checkbox', class: 'pchk', checked: !!m.inv, onclick: e => e.stopPropagation(), onchange: e => { hist.push('Invert mask'); m.inv = e.target.checked; pb.invalidate(); } }), 'Inverted'),
+      h('button', { class: 'tb sm', onclick: e => { e.stopPropagation(); hist.push('Delete mask'); c.masks.splice(i, 1); if (P.maskSel && P.maskSel.id === m.id) P.maskSel = null; pb.invalidate(); bus.emit('seq'); } }, icon('x', 12))))));
+    if (on) for (const [k, l, mn, mx, st] of [['feather', 'Mask Feather', 0, 300, 1], ['op', 'Mask Opacity', 0, 100, 1], ['exp', 'Mask Expansion', -100, 100, 1]])
+      ecBody.append(h('div', { class: 'pwrap' }, h('div', { class: 'prow simple eg' }, h('span', { class: 'stopw dis' }), h('span', { class: 'pl' }, l), h('span', { class: 'egc' }, h('input', { type: 'range', class: 'psl', min: mn, max: mx, step: st, value: m[k] ?? (k === 'op' ? 100 : 0), onpointerdown: () => hist.push('Mask ' + k), oninput: e => { m[k] = +e.target.value; pb.invalidate(); } })))));
+  });
+}
+function simpleRow(c, fx, q, rer) {
+  const cur = () => fx.p[q.k];
+  let ctl;
+  if (q.t === 'color') ctl = h('input', { type: 'color', class: 'pcol', value: cur(), oninput: e => setParam(c, fx, q.k, e.target.value), onpointerdown: () => hist.push('Change ' + q.l) });
+  else if (q.t === 'bool') ctl = h('input', { type: 'checkbox', class: 'pchk', checked: !!cur(), onchange: e => { hist.push('Change ' + q.l); setParam(c, fx, q.k, e.target.checked ? 1 : 0); } });
+  else if (q.t === 'sel') ctl = h('select', { class: 'msel', onchange: e => { hist.push('Change ' + q.l); setParam(c, fx, q.k, +e.target.value); } }, q.opts.map((o, i) => h('option', { value: i, selected: i === Math.round(cur()) }, o)));
+  else ctl = h('input', { type: 'text', class: 'ptxt', value: cur() || '', onkeydown: e => e.stopPropagation(), oninput: e => setParam(c, fx, q.k, e.target.value), onfocus: () => hist.push('Change ' + q.l) });
+  return h('div', { class: 'pwrap' }, h('div', { class: 'prow simple' }, h('span', { class: 'stopw dis' }), h('span', { class: 'pl' }, q.l), ctl));
+}
+function trPanel(c, tr, side, x, d) {
+  const fps = P.seq.fps;
+  ecBody.append(h('div', { class: 'echead' }, h('span', {}, 'Transition - ' + d.name), h('i', {}, side === 'tin' ? 'at clip start' : 'at clip end')));
+  const rer = () => ecDraw(true);
+  const row = (l, ctl) => ecBody.append(h('div', { class: 'pwrap' }, h('div', { class: 'prow simple' }, h('span', { class: 'stopw dis' }), h('span', { class: 'pl' }, l), ctl)));
+  const REG = x.audio ? ATRANS : TRANS;
+  const typ = h('select', { class: 'msel', onchange: e => { hist.push('Change transition'); const n = e.target.value; x.type = n; x.p = {}; REG[n].params.forEach(q => x.p[q.k] = q.def); pb.invalidate(); bus.emit('seq'); } }, Object.values(REG).map(t => h('option', { value: t.type, selected: t.type === x.type }, t.name)));
+  row('Transition', typ);
+  row('Duration', h('input', { type: 'number', class: 'nvi', step: 1 / fps, min: 2 / fps, value: +x.dur.toFixed(3), onkeydown: e => e.stopPropagation(), onchange: e => { hist.push('Transition duration'); x.dur = Math.max(2 / fps, +e.target.value || 1); pb.invalidate(); bus.emit('seq'); } }));
+  if (side === 'tin') row('Alignment', h('select', { class: 'msel', onchange: e => { hist.push('Transition alignment'); x.align = e.target.value; pb.invalidate(); bus.emit('seq'); } }, [['center', 'Center at Cut'], ['start', 'Start at Cut'], ['end', 'End at Cut']].map(([v, l]) => h('option', { value: v, selected: (x.align || 'center') === v }, l))));
+  for (const q of d.params) {
+    const get = () => x.p[q.k] ?? q.def, set = v => { x.p[q.k] = v; pb.invalidate(); };
+    let ctl;
+    if (q.t === 'color') ctl = h('input', { type: 'color', class: 'pcol', value: get(), onpointerdown: () => hist.push('Transition'), oninput: e => set(e.target.value) });
+    else if (q.t === 'bool') ctl = h('input', { type: 'checkbox', class: 'pchk', checked: !!get(), onchange: e => { hist.push('Transition'); set(e.target.checked ? 1 : 0); } });
+    else if (q.t === 'sel') ctl = h('select', { class: 'msel', onchange: e => { hist.push('Transition'); set(+e.target.value); } }, q.opts.map((o, i) => h('option', { value: i, selected: i === Math.round(get()) }, o)));
+    else { const lab = h('span', { class: 'nv' }, String(+(+get()).toFixed(2))); ctl = h('span', { class: 'trnum' }, lab, h('input', { type: 'range', class: 'psl', min: q.min, max: q.max, step: q.step, value: get(), onpointerdown: () => hist.push('Transition'), oninput: e => { set(+e.target.value); lab.textContent = String(+(+e.target.value).toFixed(2)); } })); }
+    row(q.l, ctl);
+  }
+  ecBody.append(h('div', { class: 'ptool' }, h('button', { class: 'btn', onclick: () => E.removeTransition(c.id, side) }, 'Remove transition')));
+}
 function paramRow(c, fx, q, rer) {
+  if (q.t && q.t !== 'num') return simpleRow(c, fx, q, rer);
   const key = kfKey(fx.id, q.k); const arr = c.kf && c.kf[key]; const animated = !!(arr && arr.length);
   const t = lt(c);
   const sw = h('button', { class: 'stopw' + (animated ? ' on' : ''), title: 'Toggle Animation', onclick: () => {
@@ -127,35 +184,58 @@ function easeMenu(e, c, arr, p) {
 }
 
 // ---------------- Effects browser ----------------
-const TR_LIST = []; // transitions arrive in phase 3
 function efBuild(el) {
   el.classList.add('efp');
-  const q = h('input', { class: 'psearch', placeholder: 'Search effects', oninput: () => draw() });
+  const q = h('input', { class: 'psearch', placeholder: 'Search effects and transitions', oninput: () => draw() });
   const list = h('div', { class: 'eflist' });
   el.append(h('div', { class: 'ptool' }, q), list);
-  const open = new Set(['Color Correction']);
+  const open = new Set(['Video Effects', 'Video Transitions', 'Video Effects/Color Correction', 'Video Transitions/Dissolve']);
+  const fav = () => ls.get('favfx', []);
+  const roots = () => [
+    ['Video Effects', CATS.map(cat => [cat, Object.values(FX).filter(f => f.cat === cat && !f.hidden && !f.builtin || f.type === 'lumetri' && f.cat === cat).map(f => ({ name: f.name, type: f.type, kind: 'fx' }))])],
+    ['Video Transitions', TCATS.map(cat => [cat, Object.values(TRANS).filter(f => f.cat === cat).map(f => ({ name: f.name, type: f.type, kind: 'tr' }))])],
+    ['Audio Effects', ACATS.map(cat => [cat, Object.values(AFX).filter(f => f.cat === cat).map(f => ({ name: f.name, type: f.type, kind: 'afx' }))])],
+    ['Audio Transitions', [['Crossfade', Object.values(ATRANS).map(f => ({ name: f.name, type: f.type, kind: 'atr' }))]]],
+  ];
   const draw = () => {
-    list.innerHTML = ''; const s = q.value.toLowerCase();
-    for (const cat of CATS) {
-      const fxs = Object.values(FX).filter(f => f.cat === cat && !f.hidden && (!s || f.name.toLowerCase().includes(s)));
-      if (!fxs.length) continue;
-      const o = open.has(cat) || !!s;
-      list.append(h('div', { class: 'efcat', onclick: () => { o ? open.delete(cat) : open.add(cat); draw(); } }, h('span', { class: 'twist' + (o ? ' o' : '') }, icon('chev', 11)), icon('folder', 14), cat));
-      if (o) fxs.forEach(f => {
-        const r = h('div', { class: 'efitem', draggable: 'true', title: 'Double-click to apply to selected clips' }, icon('fx', 14), f.name);
-        r.addEventListener('dragstart', e => e.dataTransfer.setData('text/op-fx', f.type));
-        r.addEventListener('dblclick', () => applyFx(f.type));
-        list.append(r);
-      });
+    list.innerHTML = ''; const s = q.value.toLowerCase().trim();
+    const fv = fav();
+    if (fv.length && !s) {
+      const key = 'Favorites', o = open.has(key);
+      list.append(h('div', { class: 'efroot', onclick: () => { o ? open.delete(key) : open.add(key); draw(); } }, h('span', { class: 'twist' + (o ? ' o' : '') }, icon('chev', 11)), icon('star', 13), 'Favorites'));
+      if (o) fv.forEach(t => { const it = findItem(t); if (it) list.append(itemRow(it, 1)); });
     }
+    for (const [root, cats] of roots()) {
+      const rk = root, ro = open.has(rk) || !!s;
+      const rows = cats.map(([cat, items]) => [cat, items.filter(i => !s || i.name.toLowerCase().includes(s) || cat.toLowerCase().includes(s))]).filter(([, i]) => i.length);
+      if (!rows.length) continue;
+      list.append(h('div', { class: 'efroot', onclick: () => { ro && !s ? open.delete(rk) : open.add(rk); draw(); } }, h('span', { class: 'twist' + (ro ? ' o' : '') }, icon('chev', 11)), icon('folder', 14), root));
+      if (!ro) continue;
+      for (const [cat, items] of rows) {
+        const ck = root + '/' + cat, o = open.has(ck) || !!s;
+        list.append(h('div', { class: 'efcat', onclick: () => { o && !s ? open.delete(ck) : open.add(ck); draw(); } }, h('span', { class: 'twist' + (o ? ' o' : '') }, icon('chev', 11)), icon('folder', 13), cat));
+        if (o) items.forEach(it => list.append(itemRow(it, 2)));
+      }
+    }
+  };
+  const findItem = t => { for (const [, cats] of roots()) for (const [, items] of cats) { const i = items.find(x => x.kind + ':' + x.type === t); if (i) return i; } return null; };
+  const itemRow = (it, lvl) => {
+    const key = it.kind + ':' + it.type, isF = fav().includes(key);
+    const r = h('div', { class: 'efitem l' + lvl, draggable: 'true', title: 'Double-click to apply' }, icon(it.kind === 'tr' || it.kind === 'atr' ? 'trans' : it.kind === 'afx' ? 'wave' : 'fx', 14), h('span', { class: 'efn' }, it.name),
+      h('button', { class: 'tb xs fav' + (isF ? ' on' : ''), title: 'Favorite', onclick: e => { e.stopPropagation(); const f = fav(); ls.set('favfx', isF ? f.filter(x => x !== key) : [...f, key]); draw(); } }, icon('star', 11)));
+    r.addEventListener('dragstart', e => { if (it.kind === 'fx') e.dataTransfer.setData('text/op-fx', it.type); else if (it.kind === 'afx') e.dataTransfer.setData('text/op-fx', it.type); else e.dataTransfer.setData('text/op-trans', it.type); });
+    r.addEventListener('dblclick', () => { if (it.kind === 'fx' || it.kind === 'afx') applyFx(it.type); else E.applyDefaultTransition(it.kind === 'tr' ? 'v' : 'a', it.type); });
+    return r;
   };
   draw();
 }
 export function applyFx(type, clips) {
-  const cs = (clips && clips.length ? clips : selClips()).filter(c => c.type === 'v' || false);
+  const isA = !!AFX[type];
+  const cs = (clips && clips.length ? clips : selClips()).filter(c => c.type === (isA ? 'a' : 'v'));
   if (!cs.length) return;
-  hist.push('Apply ' + FX[type].name);
-  cs.forEach(c => { if (type === 'lumetri') return; c.fx.push(newFx(type)); });
+  const name = (FX[type] || AFX[type]).name;
+  hist.push('Apply ' + name);
+  cs.forEach(c => { if (type === 'lumetri') return; const f = isA ? (() => { const p = {}; AFX[type].params.forEach(q => p[q.k] = q.def); return { id: uid('f'), type, on: true, p }; })() : newFx(type); c.fx.push(f); });
   pb.invalidate(); bus.emit('seq');
 }
 
@@ -325,9 +405,10 @@ function histBuild(el) {
 }
 function markersBuild(el) {
   el.classList.add('markers');
-  const draw = () => { el.innerHTML = ''; if (!P.markers.length) { el.append(h('div', { class: 'pempty' }, 'No markers')); return; }
-    P.markers.forEach(m => el.append(h('div', { class: 'mrow', onclick: () => pb.seek(m.t) }, h('i', { style: { background: m.color } }), h('span', {}, tc(m.t, P.seq ? P.seq.fps : 30)), h('b', {}, m.name), h('button', { class: 'tb sm', onclick: e => { e.stopPropagation(); P.markers = P.markers.filter(x => x !== m); bus.emit('markers'); bus.emit('seq'); } }, icon('x', 12))))); };
-  bus.on('markers', draw); draw();
+  const draw = () => { el.innerHTML = ''; el.append(h('div', { class: 'mtool' }, h('button', { class: 'btn', onclick: () => tl.addMarker() }, 'Add marker'), h('button', { class: 'btn', onclick: () => { if (!P.markers.length) return; hist.push('Clear markers'); P.markers = []; bus.emit('markers'); bus.emit('seq'); } }, 'Clear all')));
+    if (!P.markers.length) { el.append(h('div', { class: 'pempty' }, 'No markers. Press M to add one')); return; }
+    P.markers.forEach(m => el.append(h('div', { class: 'mrow', onclick: () => pb.seek(m.t), ondblclick: () => markerDialog(m) }, h('i', { style: { background: m.color } }), h('span', {}, tc(m.t, P.seq ? P.seq.fps : 30)), h('b', {}, m.name, m.comment ? h('em', {}, ' ' + m.comment) : null), h('span', { class: 'mty' }, m.type || ''), h('button', { class: 'tb sm', onclick: e => { e.stopPropagation(); hist.push('Delete marker'); P.markers = P.markers.filter(x => x !== m); bus.emit('markers'); bus.emit('seq'); } }, icon('x', 12))))); };
+  bus.on('markers', draw); bus.on('seq', draw); draw();
 }
 function metaBuild(el) {
   el.classList.add('info');
@@ -337,7 +418,7 @@ function metaBuild(el) {
 }
 
 // ---------------- Learn (shortcuts) ----------------
-export const SHORTCUTS = [['Space', 'Play / Stop'], ['J K L', 'Shuttle reverse / pause / forward'], ['Left / Right', 'Step one frame'], ['Shift+Left / Right', 'Step five frames'], ['Up / Down', 'Previous / next edit point'], ['Home / End', 'Go to start / end'], ['I / O', 'Mark In / Out'], ['Shift+I / O', 'Go to In / Out'], ['X', 'Mark clip'], [', / .', 'Insert / Overwrite from source'], ['; / \'', 'Lift / Extract'], ['Ctrl+K', 'Add edit (razor at playhead)'], ['Delete', 'Clear selected'], ['Shift+Delete', 'Ripple delete'], ['V A B R C Y P H Z T', 'Tools'], ['S', 'Toggle snapping'], ['M', 'Add marker'], ['\\', 'Zoom timeline to fit'], ['= / -', 'Zoom in / out'], ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / Redo'], ['Ctrl+I', 'Import media'], ['Ctrl+Shift+E', 'Export frame'], ['`', 'Maximize hovered panel']];
+export const SHORTCUTS = [['Space', 'Play / Stop'], ['J K L', 'Shuttle reverse / pause / forward'], ['Left / Right', 'Step one frame'], ['Shift+Left / Right', 'Step five frames'], ['Up / Down', 'Previous / next edit point'], ['Home / End', 'Go to start / end'], ['I / O', 'Mark In / Out'], ['Shift+I / O', 'Go to In / Out'], ['X', 'Mark clip'], [', / .', 'Insert / Overwrite from source'], ['; / \'', 'Lift / Extract'], ['Ctrl+K', 'Add edit (razor at playhead)'], ['Delete', 'Clear selected'], ['Shift+Delete', 'Ripple delete'], ['V A B R C Y P H Z T', 'Tools'], ['S', 'Toggle snapping'], ['M', 'Add marker'], ['\\', 'Zoom timeline to fit'], ['= / -', 'Zoom in / out'], ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / Redo'], ['Ctrl+I', 'Import media'], ['Ctrl+Shift+E', 'Export frame'], ['`', 'Maximize hovered panel'], ['Q / W', 'Ripple trim previous / next edit to playhead'], ['Alt+Q / W', 'Trim previous / next edit to playhead'], ['E', 'Extend selected edit to playhead'], ['Shift+E', 'Enable / disable clip'], ['Shift+J / L', 'Slow shuttle'], ['Page Up / Down', 'Previous / next edit'], ['F', 'Match frame'], ['Shift+R', 'Reverse match frame'], ['G', 'Audio gain'], ['Ctrl+Shift+I / O', 'Clear In / Out'], ['Ctrl+Shift+X', 'Clear In and Out'], ['Shift+M', 'Next marker'], ['Ctrl+Shift+M', 'Previous marker'], ['Ctrl+Alt+M', 'Clear marker at playhead'], ['Ctrl+Alt+Shift+M', 'Clear all markers'], ['Ctrl+G / Ctrl+Shift+G', 'Group / ungroup'], ['Alt+drag', 'Duplicate clip'], ['Alt+Arrows', 'Nudge clip'], ['Shift+= / Shift+-', 'Taller / shorter tracks'], ['Shift+1..8', 'Focus panels'], ['Ctrl+D / Ctrl+Shift+D', 'Default video / audio transition'], ['Ctrl+F', 'Find in project'], ['Ctrl+Shift+P', 'Command palette'], ['Shift+A', 'Track select backward'], ['N / U', 'Rolling / slide tool']];
 function learnBuild(el) {
   el.classList.add('info');
   SHORTCUTS.forEach(([k, d]) => el.append(h('div', { class: 'irow' }, h('b', {}, k), h('span', {}, d))));

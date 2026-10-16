@@ -34,7 +34,7 @@ export function clearRange(tr, a, b, except) {
 }
 export const speedOf = c => { const f = (c.fx || []).find(x => x.type === 'time'); return f ? f.p.speed / 100 : 1; };
 export function shiftKf(c, d) { for (const k in c.kf) c.kf[k].forEach(p => p.t -= d); }
-export const cloneClip = c => { const n = JSON.parse(JSON.stringify(c)); n.id = uid('c'); n.link = null; return n; };
+export const cloneClip = c => { const n = JSON.parse(JSON.stringify(c)); n.id = uid('c'); n.link = null; delete n.tin; delete n.tout; return n; };
 
 export function targetTrack(kind) { const s = P.seq; const arr = kind === 'v' ? s.v : s.a; return arr.find(t => t.target && !t.lock) || arr.find(t => !t.lock); }
 
@@ -81,7 +81,7 @@ export function split(t, ids) {
     const off = t - c.start; const r = cloneClip(c);
     r.start = t; r.in = c.in + off * speedOf(c); r.dur = c.dur - off; shiftKf(r, off); r.name = c.name;
     if (c.link) { links[c.link] ||= uid('l'); r.link = links[c.link]; }
-    c.dur = off; r.type = c.type;
+    c.dur = off; r.type = c.type; if (c.tout) { r.tout = c.tout; delete c.tout; }
     tr.clips.push(r); tr.clips.sort((a, b) => a.start - b.start); any = true;
   }
   bus.emit('seq');
@@ -145,4 +145,29 @@ export function moveClips(starts, ids, dt, dTrack) {
   }
   for (const [tr, c] of moved) { if (tr.lock) continue; clearRange(tr, c.start, c.start + c.dur, set); tr.clips.push(c); tr.clips.sort((a, b) => a.start - b.start); }
   bus.emit('seq');
+}
+
+// ---- transitions ----
+import { newTrans, DEFAULT_VT, TRANS } from './trans.js';
+import { ATRANS, DEFAULT_AT } from './afx.js';
+export function addTransition(tr, c, side, type) {
+  if (!type) type = c.type === 'a' ? DEFAULT_AT : DEFAULT_VT;
+  const audio = !!ATRANS[type];
+  if ((c.type === 'a') !== !!ATRANS[type]) return false;
+  hist.push('Apply transition');
+  c[side] = audio ? { id: uid('t'), type, dur: 1, align: 'center', p: {}, audio: true } : newTrans(type);
+  P.selTr = { id: c.id, side }; bus.emit('seq'); bus.emit('select'); return true;
+}
+export function removeTransition(clipId, side) { const f = findClip(clipId); if (!f) return; hist.push('Remove transition'); delete f.c[side]; if (P.selTr && P.selTr.id === clipId) P.selTr = null; bus.emit('seq'); bus.emit('select'); }
+// nearest edit on the selected / all clips of a kind to the playhead
+export function applyDefaultTransition(kind = 'v', type = null, t = P.t) {
+  let best = null;
+  const sel = P.sel.map(id => findClip(id)).filter(f => f && f.c.type === kind);
+  const cands = sel.length ? sel : (kind === 'v' ? P.seq.v : P.seq.a).flatMap(tr => tr.clips.map(c => ({ c, tr })));
+  for (const { c, tr } of cands) for (const side of ['tin', 'tout']) {
+    const T = side === 'tin' ? c.start : c.start + c.dur; const d = Math.abs(T - t);
+    if (!best || d < best.d) best = { c, tr, side, d };
+  }
+  if (!best) return false;
+  return addTransition(best.tr, best.c, best.side, type || (kind === 'a' ? DEFAULT_AT : DEFAULT_VT));
 }
