@@ -103,9 +103,26 @@ function drawMenus() {
   const mk = (n, items) => h('div', { class: 'mn' + (n === 'OpenPremiere' ? ' app' : ''), onclick: () => { const r = mb.querySelector('[data-mn="' + n + '"]').getBoundingClientRect(); popMenu(r.left, r.bottom, items().map(it => it === '-' ? it : [it[0], it[1] || (() => { }), fmtKey(it[2]), it[3]])); }, 'data-mn': n }, n);
   if (mac) mb.append(mk('OpenPremiere', () => [['About OpenPremiere', () => alert('OpenPremiere v0.2 - open source browser video editor')], '-', ['Preferences...', prefsDialog, 'Ctrl+,'], '-', ['Home', goHome, '']]));
   for (const n of Object.keys(MENUS)) mb.append(mk(n, MENUS[n]));
+  const col = h('button', { class: 'topx', title: 'Hide top bar (hover the top edge to bring it back)', onclick: () => setTopCollapsed(!topCollapsed) });
+  col.append(icon(topCollapsed ? 'pin' : 'closex', 14)); mb.append(h('div', { class: 'grow' }), col);
   drawHeader();
 }
 let editWs = ls.get('editWs', 'Editing');
+let topCollapsed = !!ls.get('topCollapsed', false), peekT = 0;
+function setTopCollapsed(v) {
+  topCollapsed = v; ls.set('topCollapsed', v);
+  document.getElementById('app').classList.toggle('topc', v); document.getElementById('app').classList.remove('peek');
+  drawMenus(); setTimeout(() => bus.emit('resize'), 60);
+}
+{
+  const app = document.getElementById('app');
+  const hot = h('div', { id: 'tophot' });
+  app.append(hot);
+  const show = () => { clearTimeout(peekT); if (topCollapsed) app.classList.add('peek'); };
+  const hide = () => { clearTimeout(peekT); peekT = setTimeout(() => app.classList.remove('peek'), 350); };
+  for (const el of [hot, document.getElementById('menubar'), document.getElementById('hdrbar')]) { el.addEventListener('pointerenter', show); el.addEventListener('pointerleave', hide); }
+  app.classList.toggle('topc', topCollapsed);
+}
 function drawHeader() {
   const hb = document.getElementById('hdrbar'); hb.innerHTML = '';
   const cur = curWs(); const mode = cur === 'Import' ? 'import' : 'edit';
@@ -115,7 +132,7 @@ function drawHeader() {
   const title = h('div', { class: 'hb-title', title: 'Rename project', onclick: async () => { const n = prompt('Project name', P.projName); if (n) { P.projName = n; const { renameProject } = await import('./project.js'); await renameProject(P.projId, n); drawHeader(); } } });
   const setTitle = () => { title.textContent = P.projName + (P.history && P.history.length ? ' - Edited' : ''); };
   setTitle(); bus.on('history', setTitle);
-  hb.append(h('button', { class: 'hb home', title: 'Home', onclick: goHome }, icon('home', 22)),
+  hb.append(h('button', { class: 'hb hb-home', title: 'Home', onclick: goHome }, icon('home', 22)),
     mt('import', 'Import', () => setWs('Import')), mt('edit', 'Edit', () => setWs(editWs)), mt('export', 'Export', () => exportDialog()),
     h('div', { class: 'hb-mid' }, title),
     h('div', { class: 'hb-ws', onclick: wsMenu, title: 'Workspaces' }, (cur === 'Import' ? editWs : cur).toUpperCase(), h('i', {}, icon('tarrow', 12))),
